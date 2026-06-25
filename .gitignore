@@ -1,0 +1,22 @@
+﻿VoiceInput/config/settings.json
+
+[Bb]in/
+[Oo]bj/
+
+*.user
+*.userosscache
+*.sln.docstates
+*.suo
+*.cache
+
+.idea/
+*.sln.DotSettings.user
+*.sln.DotSettings
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Mac
+.DS_Store
