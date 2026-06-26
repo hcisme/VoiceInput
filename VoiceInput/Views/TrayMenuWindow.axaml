@@ -1,0 +1,49 @@
+﻿<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="VoiceInput.Views.TrayMenuWindow"
+        WindowDecorations="None"
+        Topmost="True"
+        ShowInTaskbar="False"
+        Background="Transparent"
+        TransparencyLevelHint="Transparent"
+        SizeToContent="WidthAndHeight"
+        MinWidth="120"
+        CanResize="False">
+
+    <Window.Styles>
+        <Style Selector="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="#333333" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="Padding" Value="8,6" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="Button:pointerover">
+            <Setter Property="Background" Value="#F0F0F0" />
+            <Setter Property="Foreground" Value="#000000" />
+        </Style>
+    </Window.Styles>
+
+    <Border Name="MainBorder"
+            Background="White"
+            CornerRadius="6"
+            Padding="2"
+            BoxShadow="-7 -8 11 -6 #63000000"
+            BorderBrush="#E5E5E5"
+            BorderThickness="1"
+            Opacity="0"
+            Margin="0,10,0,0">
+        <Border.Transitions>
+            <Transitions>
+                <DoubleTransition Property="Opacity" Duration="0:0:0.15" />
+                <ThicknessTransition Property="Margin" Duration="0:0:0.15" />
+            </Transitions>
+        </Border.Transitions>
+
+        <StackPanel>
+            <Button Content="退出" Click="Exit_Click" HorizontalAlignment="Stretch" />
+        </StackPanel>
+    </Border>
+</Window>
