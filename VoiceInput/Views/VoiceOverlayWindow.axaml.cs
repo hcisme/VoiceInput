@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
@@ -8,11 +9,48 @@ namespace VoiceInput.Views;
 
 public partial class VoiceOverlayWindow : Window
 {
+    private int _animationToken;
+
     public VoiceOverlayWindow()
     {
         InitializeComponent();
 
         LayoutUpdated += (s, e) => UpdatePosition();
+    }
+
+    public async void ShowWithAnimation()
+    {
+        var border = this.FindControl<Border>("MainBorder");
+        if (border == null) return;
+
+        _animationToken += 1;
+
+        border.Opacity = 0;
+        border.Margin = new Thickness(0, 20, 0, 0);
+
+        Show();
+
+        await Task.Delay(10);
+
+        border.Opacity = 1;
+        border.Margin = new Thickness(0, 0, 0, 0);
+    }
+
+    public async Task HideWithAnimation()
+    {
+        var border = this.FindControl<Border>("MainBorder");
+        if (border == null) return;
+
+        var currentToken = ++_animationToken;
+
+        border.Opacity = 0;
+        border.Margin = new Thickness(0, 20, 0, 0);
+
+        await Task.Delay(150);
+        if (_animationToken == currentToken)
+        {
+            Hide();
+        }
     }
 
     public void UpdateText(string text)

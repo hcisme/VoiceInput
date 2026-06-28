@@ -5,8 +5,16 @@
         <Nullable>enable</Nullable>
         <ApplicationManifest>app.manifest</ApplicationManifest>
         <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
-        <ApplicationIcon>Assets\avalonia-logo.ico</ApplicationIcon>
+        <ApplicationIcon>Assets\favicon.ico</ApplicationIcon>
         <UseWindowsForms>true</UseWindowsForms>
+        <PublishTrimmed>false</PublishTrimmed>
+
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        
+        <Version>1.0.2</Version>
+        <Product>VoiceInput</Product>
+        <Authors>chihaicheng</Authors>
+        <Copyright>Copyright © 2026 chihaicheng</Copyright>
     </PropertyGroup>
 
     <ItemGroup>

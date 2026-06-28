@@ -100,7 +100,7 @@ public class XunfeiApi
         var json = JsonSerializer.Serialize(requestObj);
         var bytes = Encoding.UTF8.GetBytes(json);
         await _webSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, _cts!.Token);
-        await Task.Delay(500);
+        await Task.Delay(180);
         await CloseAsync();
     }
 
