@@ -1,5 +1,5 @@
 #define MyAppName "VoiceInput"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.2"
 #define MyAppPublisher "chihaicheng"
 #define MyAppExeName "VoiceInput.exe"
 
@@ -9,13 +9,14 @@
 AppId={{9A2B4C6D-1E3F-4G5H-6I7J-8K9L0M1N2O3P}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
+AppMutex=VoiceInput_Unique_App_Mutex
 AppPublisher={#MyAppPublisher}
 
 DefaultDirName={localappdata}\{#MyAppName}
 DisableProgramGroupPage=yes
 
 OutputDir=D:\code\CSharp\output\VoiceInput
-OutputBaseFilename=VoiceInput_Setup_v1.0
+OutputBaseFilename={#MyAppName}_Setup_v{#MyAppVersion}
 
 Compression=lzma
 SolidCompression=yes
@@ -32,8 +33,8 @@ Source: "{#MyPublishDir}*"; DestDir: "{app}"; Excludes: "*.pdb"; Flags: ignoreve
 
 [Icons]
 ; 创建开始菜单和桌面快捷方式
-Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
 ; 安装完成后自动勾选“运行软件”

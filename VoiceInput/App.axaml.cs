@@ -149,19 +149,19 @@ public partial class App : Application
 
     private void OnKeyPressed(object? sender, KeyboardHookEventArgs e)
     {
+        _currentRecognizedText = string.Empty;
         if (e.Data.KeyCode is KeyCode.VcLeftControl or KeyCode.VcRightControl) _isCtrlPressed = true;
         if (e.Data.KeyCode is KeyCode.VcLeftMeta or KeyCode.VcRightMeta) _isWinPressed = true;
 
         if (_isCtrlPressed && _isWinPressed && !_isRecording)
         {
             _isRecording = true;
-            _currentRecognizedText = string.Empty;
 
             _ = Task.Run(async () =>
             {
                 Dispatcher.UIThread.Post(() =>
                 {
-                    _overlayWindow.Show();
+                    _overlayWindow.ShowWithAnimation();
                     _overlayWindow.UpdateText(string.Empty);
                 });
 
@@ -189,8 +189,6 @@ public partial class App : Application
         {
             _isRecording = false;
 
-            Dispatcher.UIThread.Post(_overlayWindow.Hide);
-
             _ = Task.Run(async () =>
             {
                 if (_waveIn is not null)
@@ -205,19 +203,20 @@ public partial class App : Application
                 var finalText = _currentRecognizedText;
                 Log.Information("停止录音！");
 
-                Dispatcher.UIThread.Post(async () =>
+                Dispatcher.UIThread.Post(() =>
                 {
+                    _ = _overlayWindow.HideWithAnimation();
                     if (string.IsNullOrWhiteSpace(finalText)) return;
 
                     var clipboard = TopLevel.GetTopLevel(_overlayWindow)?.Clipboard;
                     if (clipboard is not null)
                     {
-                        await clipboard.SetTextAsync(finalText);
+                        _ = clipboard.SetTextAsync(finalText);
                         Log.Information("识别完成，已写入剪贴板并模拟粘贴。内容长度: {Length}", finalText.Length);
                     }
 
-                    await Task.Delay(100);
-                    KeyboardSimulator.SimulateCtrlV();
+                    KeyboardSimulator.SimulateTextEntry(finalText);
+                    _currentRecognizedText = string.Empty;
                 });
             });
         }
