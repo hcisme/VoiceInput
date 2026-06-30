@@ -201,7 +201,7 @@ public partial class App : Application
 
                 await _xunfeiApi.StopAndSendLastFrameAsync();
                 var finalText = _currentRecognizedText;
-                Log.Information("停止录音！");
+                Log.Information("停止录音");
 
                 Dispatcher.UIThread.Post(() =>
                 {

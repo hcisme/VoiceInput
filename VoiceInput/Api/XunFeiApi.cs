@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Serilog;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -224,7 +225,7 @@ public class XunfeiApi
         }
         catch (Exception ex)
         {
-            Console.WriteLine("JSON解析异常: " + ex.Message);
+            Log.Error(ex, "JSON解析异常");
         }
     }
 

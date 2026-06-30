@@ -28,8 +28,10 @@ public partial class VoiceOverlayWindow : Window
         border.Opacity = 0;
         border.Margin = new Thickness(0, 20, 0, 0);
 
-        Show();
+        Topmost = false;
+        Topmost = true;
 
+        Show();
         await Task.Delay(10);
 
         border.Opacity = 1;
