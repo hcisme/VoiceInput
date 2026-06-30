@@ -1,5 +1,5 @@
 #define MyAppName "VoiceInput"
-#define MyAppVersion "1.0.2"
+#define MyAppVersion "1.0.3"
 #define MyAppPublisher "chihaicheng"
 #define MyAppExeName "VoiceInput.exe"
 

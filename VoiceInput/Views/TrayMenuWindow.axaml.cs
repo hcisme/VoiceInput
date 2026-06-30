@@ -24,6 +24,8 @@ public partial class TrayMenuWindow : Window
         border.Margin = new Thickness(0, 10, 0, 0);
 
         Position = new PixelPoint(x, y);
+        Topmost = false;
+        Topmost = true;
         Show();
         Activate();
 

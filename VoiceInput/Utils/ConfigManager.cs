@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Serilog;
+using System;
 using System.IO;
 using System.Text.Json;
 
@@ -13,9 +14,14 @@ public class AppConfig
 
 public static class ConfigManager
 {
+    private static readonly JsonSerializerOptions _jsonOptions = new JsonSerializerOptions
+    {
+        WriteIndented = true
+    };
+
     public static AppConfig LoadConfig()
     {
-        var baseDir = AppContext.BaseDirectory; 
+        var baseDir = AppContext.BaseDirectory;
         var configDirPath = Path.Combine(baseDir, "config");
         var configFilePath = Path.Combine(configDirPath, "settings.json");
 
@@ -27,9 +33,8 @@ public static class ConfigManager
         if (!File.Exists(configFilePath))
         {
             var defaultConfig = new AppConfig();
-            var options = new JsonSerializerOptions { WriteIndented = true };
-            var json = JsonSerializer.Serialize(defaultConfig, options);
-            
+            var json = JsonSerializer.Serialize(defaultConfig, _jsonOptions);
+
             File.WriteAllText(configFilePath, json);
             return defaultConfig;
         }
@@ -37,11 +42,11 @@ public static class ConfigManager
         try
         {
             var json = File.ReadAllText(configFilePath);
-            return JsonSerializer.Deserialize<AppConfig>(json) ?? new AppConfig();
+            return JsonSerializer.Deserialize<AppConfig>(json, _jsonOptions) ?? new AppConfig();
         }
         catch (Exception ex)
         {
-            Console.WriteLine("配置文件读取失败: " + ex.Message);
+            Log.Error(ex, "配置文件读取失败");
             return new AppConfig();
         }
     }
