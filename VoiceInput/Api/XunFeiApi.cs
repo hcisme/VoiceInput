@@ -1,5 +1,4 @@
-﻿using Serilog;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -9,11 +8,38 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Serilog;
 
 namespace VoiceInput.Api;
 
-public class XunfeiApi
+public class XunfeiApi : IDisposable
 {
+    // ✅ [改] 将所有魔法字符串常量提取为 const，集中管理，便于修改
+    private const string WssHost = "iat-api.xfyun.cn";
+    private const string WssPath = "/v2/iat";
+    private const string WssUrl = $"wss://{WssHost}{WssPath}";
+
+    // ✅ [改] business 参数中的配置常量化
+    private const string AudioFormat = "audio/L16;rate=16000";
+    private const string AudioEncoding = "raw";
+    private const string Language = "zh_cn";
+    private const string Domain = "iat";
+    private const string Accent = "mandarin";
+
+    // ✅ [改] 根据文档说明显式注释每个参数的含义和取值范围
+    // ptt：标点符号，0=无标点，1=有标点（默认1）
+    private const int Ptt = 1;
+
+    // vad_eos：后端点静音检测时长（ms），范围[0,10000]，默认2000
+    // 语音输入场景适当调大，避免说话停顿时过早截断
+    private const int VadEos = 5000;
+
+    // dwa：动态修正，wpgs=开启（仅中文支持），可实时修正识别结果
+    private const string Dwa = "wpgs";
+
+    // nunum：是否将数字转为阿拉伯数字，0=不转换，1=转换（默认1）
+    private const int Nunum = 1;
+
     private readonly string _appId;
     private readonly string _apiSecret;
     private readonly string _apiKey;
@@ -21,8 +47,11 @@ public class XunfeiApi
     private ClientWebSocket? _webSocket;
     private CancellationTokenSource? _cts;
     private bool _isFirstFrame = true;
-    private Dictionary<int, string> _sentenceMap = new();
-    public Action<string>? onTextChanged;
+
+    private readonly Dictionary<int, string> _sentenceMap = new();
+    public event Action<string>? OnTextChanged;
+
+    private bool _disposed;
 
     public XunfeiApi(string appId, string apiSecret, string apiKey)
     {
@@ -33,6 +62,8 @@ public class XunfeiApi
 
     public async Task ConnectAsync()
     {
+        await CloseAsync();
+
         _isFirstFrame = true;
         _sentenceMap.Clear();
         _cts = new CancellationTokenSource();
@@ -56,21 +87,25 @@ public class XunfeiApi
         {
             requestObj = new
             {
-                common = new { app_id = _appId },
+                common = new
+                {
+                    app_id = _appId
+                },
                 business = new
                 {
-                    language = "zh_cn",
-                    domain = "iat",
-                    accent = "mandarin",
-                    ptt = 1,
-                    vad_eos = 2000,
-                    dwa = "wpgs"
+                    language = Language,
+                    domain = Domain,
+                    accent = Accent,
+                    ptt = Ptt,
+                    vad_eos = VadEos,
+                    dwa = Dwa,
+                    nunum = Nunum
                 },
                 data = new
                 {
                     status,
-                    format = "audio/L16;rate=16000",
-                    encoding = "raw",
+                    format = AudioFormat,
+                    encoding = AudioEncoding,
                     audio = base64Audio
                 }
             };
@@ -80,7 +115,13 @@ public class XunfeiApi
         {
             requestObj = new
             {
-                data = new { status, format = "audio/L16;rate=16000", encoding = "raw", audio = base64Audio }
+                data = new
+                {
+                    status,
+                    format = AudioFormat,
+                    encoding = AudioEncoding,
+                    audio = base64Audio
+                }
             };
         }
 
@@ -95,7 +136,13 @@ public class XunfeiApi
 
         var requestObj = new
         {
-            data = new { status = 2, format = "audio/L16;rate=16000", encoding = "raw", audio = "" }
+            data = new
+            {
+                status = 2,
+                format = AudioFormat,
+                encoding = AudioEncoding,
+                audio = ""
+            }
         };
 
         var json = JsonSerializer.Serialize(requestObj);
@@ -107,22 +154,45 @@ public class XunfeiApi
 
     public async Task CloseAsync()
     {
-        if (_webSocket != null)
+        var cts = Interlocked.Exchange(ref _cts, null);
+        if (cts != null)
         {
-            if (_webSocket.State == WebSocketState.Open)
-            {
-                await _webSocket.CloseAsync(
-                    WebSocketCloseStatus.NormalClosure,
-                    "Normal Closure",
-                    CancellationToken.None
-                );
-            }
-
-            _webSocket.Dispose();
-            _webSocket = null;
+            await cts.CancelAsync();
+            cts.Dispose();
         }
 
-        _cts?.Cancel();
+        var webSocket = Interlocked.Exchange(ref _webSocket, null);
+        if (webSocket != null)
+        {
+            if (webSocket.State == WebSocketState.Open)
+            {
+                try
+                {
+                    await webSocket.CloseAsync(
+                        WebSocketCloseStatus.NormalClosure,
+                        "Normal Closure",
+                        CancellationToken.None);
+                }
+                catch (OperationCanceledException)
+                {
+                    // CTS 取消后 CloseAsync 收到取消信号，属于正常流程
+                }
+                catch (ObjectDisposedException)
+                {
+                    // CTS 取消后 WebSocket 已被释放，属于正常流程
+                }
+                catch (Exception ex)
+                {
+                    // 真正意外的异常才记录
+                    Log.Warning(ex, "WebSocket 关闭时发生异常");
+                }
+            }
+
+            webSocket.Dispose();
+        }
+
+        _cts?.Dispose();
+        _cts = null;
     }
 
     private async Task ReceiveLoopAsync()
@@ -143,18 +213,19 @@ public class XunfeiApi
                 if (result.MessageType == WebSocketMessageType.Close) break;
 
                 var jsonResponse = Encoding.UTF8.GetString(ms.ToArray());
-
-                // 解析这段 JSON
                 ParseResult(jsonResponse);
             }
         }
-        catch (Exception)
+        catch (OperationCanceledException)
         {
-            /* 忽略断开异常 */
+            // 主动取消属于正常流程，单独捕获，不打错误日志
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "WebSocket 接收循环异常退出");
         }
     }
 
-    // 解析讯飞返回的 JSON 数据 (支持 wpgs 动态修正)
     private void ParseResult(string json)
     {
         try
@@ -163,65 +234,67 @@ public class XunfeiApi
             var root = doc.RootElement;
 
             if (root.TryGetProperty("code", out var codeEl) && codeEl.GetInt32() != 0)
-                return;
-
-            if (root.TryGetProperty("data", out var dataEl) && dataEl.TryGetProperty("result", out var resultEl) &&
-                resultEl.ValueKind != JsonValueKind.Null)
             {
-                var sn = resultEl.TryGetProperty("sn", out var snEl) ? snEl.GetInt32() : 1;
+                var msg = root.TryGetProperty("message", out var msgEl) ? msgEl.GetString() : "unknown";
+                Log.Warning("讯飞 API 返回错误码 {Code}: {Message}", codeEl.GetInt32(), msg);
+                return;
+            }
 
-                // 取是追加还是替换 (pgs: apd=追加, rpl=替换)
-                var pgs = resultEl.TryGetProperty("pgs", out var pgsEl) ? (pgsEl.GetString() ?? "apd") : "apd";
+            if (!root.TryGetProperty("data", out var dataEl) ||
+                !dataEl.TryGetProperty("result", out var resultEl) ||
+                resultEl.ValueKind == JsonValueKind.Null
+               ) return;
 
-                // 如果是替换操作，根据 rg 参数删除旧的错字
-                if (pgs == "rpl" && resultEl.TryGetProperty("rg", out var rgEl) && rgEl.GetArrayLength() >= 2)
+            var sn = resultEl.TryGetProperty("sn", out var snEl) ? snEl.GetInt32() : 1;
+
+            // 取是追加还是替换 (pgs: apd=追加, rpl=替换)
+            var pgs = resultEl.TryGetProperty("pgs", out var pgsEl) ? (pgsEl.GetString() ?? "apd") : "apd";
+
+            // 如果是替换操作，根据 rg 参数删除旧的错字
+            if (pgs == "rpl" && resultEl.TryGetProperty("rg", out var rgEl) && rgEl.GetArrayLength() >= 2)
+            {
+                var startSn = rgEl[0].GetInt32();
+                var endSn = rgEl[1].GetInt32();
+                // 把指定范围内的旧句子全删了
+                for (var i = startSn; i <= endSn; i++)
                 {
-                    var startSn = rgEl[0].GetInt32();
-                    var endSn = rgEl[1].GetInt32();
-                    // 把指定范围内的旧句子全删了
-                    for (var i = startSn; i <= endSn; i++)
-                    {
-                        _sentenceMap.Remove(i);
-                    }
+                    _sentenceMap.Remove(i);
                 }
+            }
 
-                // 提取当前包的文字
-                var textSegment = "";
-                if (resultEl.TryGetProperty("ws", out var wsEl))
+            // 提取当前包的文字
+            if (resultEl.TryGetProperty("ws", out var wsEl))
+            {
+                var sb = new StringBuilder();
+                foreach (var wsItem in wsEl.EnumerateArray())
                 {
-                    foreach (var wsItem in wsEl.EnumerateArray())
+                    if (wsItem.TryGetProperty("cw", out var cwEl))
                     {
-                        if (wsItem.TryGetProperty("cw", out var cwEl))
+                        foreach (var cwItem in cwEl.EnumerateArray())
                         {
-                            foreach (var cwItem in cwEl.EnumerateArray())
+                            if (cwItem.TryGetProperty("w", out var wEl))
                             {
-                                if (cwItem.TryGetProperty("w", out var wEl))
-                                {
-                                    textSegment += wEl.GetString();
-                                }
+                                sb.Append(wEl.GetString());
                             }
                         }
                     }
                 }
 
-                if (_sentenceMap.ContainsKey(sn))
-                {
-                    _sentenceMap[sn] += textSegment; // 同一个序号的包可能分多次发来，所以要累加
-                }
+                var textSegment = sb.ToString();
+                if (_sentenceMap.TryGetValue(sn, out var existing))
+                    _sentenceMap[sn] = existing + textSegment;
                 else
-                {
-                    _sentenceMap[sn] = textSegment; // 新序号直接存入
-                }
-
-                // 将字典里所有的句子按序号拼接成一句完整的话
-                var sortedTexts = _sentenceMap.OrderBy(x => x.Key).Select(x => x.Value);
-                var currentFullText = string.Join("", sortedTexts);
-
-                if (!string.IsNullOrWhiteSpace(currentFullText))
-                {
-                    onTextChanged?.Invoke(currentFullText);
-                }
+                    _sentenceMap[sn] = textSegment;
             }
+
+            var fullTextBuilder = new StringBuilder();
+            foreach (var kv in _sentenceMap.OrderBy(x => x.Key))
+            {
+                fullTextBuilder.Append(kv.Value);
+            }
+
+            var currentFullText = fullTextBuilder.ToString();
+            if (!string.IsNullOrWhiteSpace(currentFullText)) OnTextChanged?.Invoke(currentFullText);
         }
         catch (Exception ex)
         {
@@ -231,18 +304,26 @@ public class XunfeiApi
 
     private string GetAuthUrl()
     {
-        string date = DateTime.UtcNow.ToString("r");
-        string signatureOrigin = $"host: iat-api.xfyun.cn\ndate: {date}\nGET /v2/iat HTTP/1.1";
+        var date = DateTime.UtcNow.ToString("r");
+        var signatureOrigin = $"host: {WssHost}\ndate: {date}\nGET {WssPath} HTTP/1.1";
 
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(_apiSecret));
-        byte[] signatureBytes = hmac.ComputeHash(Encoding.UTF8.GetBytes(signatureOrigin));
-        string signature = Convert.ToBase64String(signatureBytes);
+        var signatureBytes = hmac.ComputeHash(Encoding.UTF8.GetBytes(signatureOrigin));
+        var signature = Convert.ToBase64String(signatureBytes);
 
-        string authString =
+        var authString =
             $"api_key=\"{_apiKey}\", algorithm=\"hmac-sha256\", headers=\"host date request-line\", signature=\"{signature}\"";
-        string authorization = Convert.ToBase64String(Encoding.UTF8.GetBytes(authString));
+        var authorization = Convert.ToBase64String(Encoding.UTF8.GetBytes(authString));
 
         return
             $"wss://iat-api.xfyun.cn/v2/iat?authorization={Uri.EscapeDataString(authorization)}&date={Uri.EscapeDataString(date)}&host=iat-api.xfyun.cn";
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _ = CloseAsync();
+        GC.SuppressFinalize(this);
     }
 }

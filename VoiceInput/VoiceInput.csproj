@@ -11,14 +11,13 @@
 
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
         
-        <Version>1.0.3</Version>
+        <Version>1.0.4</Version>
         <Product>VoiceInput</Product>
         <Authors>chihaicheng</Authors>
         <Copyright>Copyright © 2026 chihaicheng</Copyright>
     </PropertyGroup>
 
     <ItemGroup>
-        <Folder Include="Models\"/>
         <AvaloniaResource Include="Assets\**"/>
     </ItemGroup>
 

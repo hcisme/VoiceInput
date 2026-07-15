@@ -4,49 +4,64 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
 using Avalonia.Media;
+using Avalonia.Threading;
 
 namespace VoiceInput.Views;
 
 public partial class VoiceOverlayWindow : Window
 {
+    private Border _mainBorder = null!;
+    private TextBlock _recognizedTextBlock = null!;
+    private Path _micIcon = null!;
+
     private int _animationToken;
 
     public VoiceOverlayWindow()
     {
         InitializeComponent();
 
-        LayoutUpdated += (s, e) => UpdatePosition();
+        _mainBorder = this.FindControl<Border>("MainBorder")
+                      ?? throw new InvalidOperationException("找不到控件: MainBorder");
+        _recognizedTextBlock = this.FindControl<TextBlock>("RecognizedTextBlock")
+                               ?? throw new InvalidOperationException("找不到控件: RecognizedTextBlock");
+        _micIcon = this.FindControl<Path>("MicIcon")
+                   ?? throw new InvalidOperationException("找不到控件: MicIcon");
+
+        SizeChanged += (s, e) => UpdatePosition();
     }
 
-    public async void ShowWithAnimation()
+    protected override void OnOpened(EventArgs e)
     {
-        var border = this.FindControl<Border>("MainBorder");
-        if (border == null) return;
+        base.OnOpened(e);
+        UpdatePosition();
+    }
 
+    public async Task ShowWithAnimation()
+    {
         _animationToken += 1;
+        var currentToken = _animationToken;
 
-        border.Opacity = 0;
-        border.Margin = new Thickness(0, 20, 0, 0);
+        _mainBorder.Opacity = 0;
+        _mainBorder.Margin = new Thickness(0, 20, 0, 0);
 
         Topmost = false;
         Topmost = true;
-
+        WindowState = WindowState.Normal;
         Show();
-        await Task.Delay(10);
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
+        if (_animationToken != currentToken) return;
 
-        border.Opacity = 1;
-        border.Margin = new Thickness(0, 0, 0, 0);
+        _mainBorder.Opacity = 1;
+        _mainBorder.Margin = new Thickness(0);
     }
 
     public async Task HideWithAnimation()
     {
-        var border = this.FindControl<Border>("MainBorder");
-        if (border == null) return;
+        _animationToken += 1;
+        var currentToken = _animationToken;
 
-        var currentToken = ++_animationToken;
-
-        border.Opacity = 0;
-        border.Margin = new Thickness(0, 20, 0, 0);
+        _mainBorder.Opacity = 0;
+        _mainBorder.Margin = new Thickness(0, 20, 0, 0);
 
         await Task.Delay(150);
         if (_animationToken == currentToken)
@@ -57,34 +72,27 @@ public partial class VoiceOverlayWindow : Window
 
     public void UpdateText(string text)
     {
-        var textBlock = this.FindControl<TextBlock>("RecognizedTextBlock")!;
-        var border = this.FindControl<Border>("MainBorder")!;
-
         if (string.IsNullOrWhiteSpace(text))
         {
-            textBlock.IsVisible = false;
-            textBlock.Text = "";
-            border.Width = 50;
-            border.Padding = new Thickness(0);
+            _recognizedTextBlock.IsVisible = false;
+            _recognizedTextBlock.Text = "";
+            _mainBorder.Width = 50;
+            _mainBorder.Padding = new Thickness(0);
         }
         else
         {
-            textBlock.IsVisible = true;
-            textBlock.Text = text;
-            border.ClearValue(WidthProperty);
-            border.Padding = new Thickness(15, 0, 20, 0);
+            _recognizedTextBlock.IsVisible = true;
+            _recognizedTextBlock.Text = text;
+            _mainBorder.ClearValue(WidthProperty);
+            _mainBorder.Padding = new Thickness(15, 0, 20, 0);
         }
     }
 
     public void UpdateVolume(float volume)
     {
-        var micIcon = this.FindControl<Path>("MicIcon");
-        if (micIcon?.RenderTransform is ScaleTransform scale)
+        if (_micIcon.RenderTransform is ScaleTransform scale)
         {
-            var targetScale = 1.0 + (volume * 0.4);
-
-            targetScale = Math.Clamp(targetScale, 1.0, 1.4);
-
+            var targetScale = Math.Clamp(1.0 + (volume * 0.4), 1.0, 1.4);
             scale.ScaleX = targetScale;
             scale.ScaleY = targetScale;
         }
