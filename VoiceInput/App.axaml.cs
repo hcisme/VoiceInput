@@ -2,6 +2,7 @@ using System;
 using System.Drawing;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
@@ -34,13 +35,17 @@ public partial class App : Application
 
     private TaskPoolGlobalHook? _globalHook;
     private WaveInEvent? _waveIn;
-
-    private string _currentRecognizedText = string.Empty;
+    private readonly object _waveInLock = new();
 
     // 状态
-    private bool _isCtrlPressed;
-    private bool _isWinPressed;
-    private bool _isRecording;
+    private string _currentRecognizedText = string.Empty;
+    private readonly object _textLock = new();
+    private volatile bool _isCtrlPressed;
+    private volatile bool _isWinPressed;
+    private int _recordingState = (int)RecordingState.Idle;
+
+    private bool _notifyIconDisposed;
+    private readonly object _disposeLock = new();
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -72,10 +77,12 @@ public partial class App : Application
 
     private void InitWindows()
     {
-        _overlayWindow = new VoiceOverlayWindow { Opacity = 0 };
+        _overlayWindow = new VoiceOverlayWindow
+        {
+            ShowInTaskbar = false,
+            WindowState = WindowState.Minimized
+        };
         _overlayWindow.Show();
-        _overlayWindow.Hide();
-        _overlayWindow.Opacity = 1;
 
         _trayMenuWindow = new TrayMenuWindow();
     }
@@ -85,9 +92,13 @@ public partial class App : Application
         var config = ConfigManager.LoadConfig();
         _xunfeiApi = new XunfeiApi(config.AppId, config.ApiSecret, config.ApiKey);
 
-        _xunfeiApi.onTextChanged += text =>
+        _xunfeiApi.OnTextChanged += text =>
         {
-            _currentRecognizedText = text;
+            lock (_textLock)
+            {
+                _currentRecognizedText = text;
+            }
+
             Dispatcher.UIThread.Post(() => _overlayWindow.UpdateText(text));
         };
     }
@@ -104,7 +115,7 @@ public partial class App : Application
             Visible = true
         };
 
-        _notifyIcon.MouseClick += (s, e) =>
+        _notifyIcon.MouseClick += (_, e) =>
         {
             if (e.Button == WinForms.MouseButtons.Right)
             {
@@ -118,7 +129,7 @@ public partial class App : Application
             }
         };
 
-        AppDomain.CurrentDomain.ProcessExit += (s, e) => DisposeNotifyIcon();
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => DisposeNotifyIcon();
     }
 
     private void InitLifecycleAndHook()
@@ -130,13 +141,21 @@ public partial class App : Application
         }
     }
 
+    /// <summary>
+    /// 每次按下ctrl win 都会初始化一次
+    /// </summary>
     private void InitMicrophone()
     {
-        _waveIn = new WaveInEvent
+        var waveIn = new WaveInEvent
         {
             WaveFormat = new WaveFormat(AudioSampleRate, AudioBitsPerSample, AudioChannels)
         };
-        _waveIn.DataAvailable += OnAudioDataAvailable;
+        waveIn.DataAvailable += OnAudioDataAvailable;
+
+        lock (_waveInLock)
+        {
+            _waveIn = waveIn;
+        }
     }
 
     private void StartKeyboardHook()
@@ -149,58 +168,109 @@ public partial class App : Application
 
     private void OnKeyPressed(object? sender, KeyboardHookEventArgs e)
     {
-        _currentRecognizedText = string.Empty;
         if (e.Data.KeyCode is KeyCode.VcLeftControl or KeyCode.VcRightControl) _isCtrlPressed = true;
         if (e.Data.KeyCode is KeyCode.VcLeftMeta or KeyCode.VcRightMeta) _isWinPressed = true;
+        if (!_isCtrlPressed || !_isWinPressed) return;
 
-        if (_isCtrlPressed && _isWinPressed && !_isRecording)
+        // 只允许从 Idle → Connecting，防止重复触发
+        if (Interlocked.CompareExchange(
+                ref _recordingState,
+                (int)RecordingState.Connecting,
+                (int)RecordingState.Idle) != (int)RecordingState.Idle)
         {
-            _isRecording = true;
-
-            _ = Task.Run(async () =>
-            {
-                Dispatcher.UIThread.Post(() =>
-                {
-                    _overlayWindow.ShowWithAnimation();
-                    _overlayWindow.UpdateText(string.Empty);
-                });
-
-                try
-                {
-                    await _xunfeiApi.ConnectAsync();
-                    InitMicrophone();
-                    _waveIn?.StartRecording();
-                    Log.Information("开始录音...");
-                }
-                catch (Exception ex)
-                {
-                    Log.Error(ex, "连接讯飞 API 或初始化麦克风失败！");
-                }
-            });
+            return;
         }
+
+        // 只在真正开始录音时清空
+        lock (_textLock)
+        {
+            _currentRecognizedText = string.Empty;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                _overlayWindow.UpdateText(string.Empty);
+                _ = _overlayWindow.ShowWithAnimation();
+            });
+
+            try
+            {
+                await _xunfeiApi.ConnectAsync();
+
+                // 连接期间若用户已松键（Stopping），立即终止，防止 _waveIn 泄露
+                if (_recordingState == (int)RecordingState.Stopping)
+                {
+                    await _xunfeiApi.StopAndSendLastFrameAsync();
+                    Dispatcher.UIThread.Post(() => _ = _overlayWindow.HideWithAnimation());
+                    Interlocked.Exchange(ref _recordingState, (int)RecordingState.Idle);
+                    return;
+                }
+
+                InitMicrophone();
+
+                lock (_waveInLock)
+                {
+                    _waveIn?.StartRecording();
+                }
+
+                Interlocked.Exchange(ref _recordingState, (int)RecordingState.Recording);
+                Log.Information("开始录音...");
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "连接讯飞 API 或初始化麦克风失败！");
+                // 异常时回退状态 并 收起界面
+                Interlocked.Exchange(ref _recordingState, (int)RecordingState.Idle);
+                Dispatcher.UIThread.Post(() => _ = _overlayWindow.HideWithAnimation());
+            }
+        });
     }
 
     private void OnKeyReleased(object? sender, KeyboardHookEventArgs e)
     {
         if (e.Data.KeyCode is KeyCode.VcLeftControl or KeyCode.VcRightControl) _isCtrlPressed = false;
         if (e.Data.KeyCode is KeyCode.VcLeftMeta or KeyCode.VcRightMeta) _isWinPressed = false;
+        if (_isCtrlPressed && _isWinPressed) return;
 
-        if ((!_isCtrlPressed || !_isWinPressed) && _isRecording)
+        var prev = Interlocked.CompareExchange(
+            ref _recordingState,
+            (int)RecordingState.Stopping,
+            (int)RecordingState.Recording);
+
+        if (prev == (int)RecordingState.Idle) return;
+        if (prev == (int)RecordingState.Connecting)
         {
-            _isRecording = false;
+            Interlocked.Exchange(ref _recordingState, (int)RecordingState.Stopping);
+            return;
+        }
+        if (prev != (int)RecordingState.Recording) return;
 
-            _ = Task.Run(async () =>
+        _ = Task.Run(async () =>
+        {
+            try
             {
-                if (_waveIn is not null)
+                lock (_waveInLock)
                 {
-                    _waveIn.DataAvailable -= OnAudioDataAvailable;
-                    _waveIn.StopRecording();
-                    _waveIn.Dispose();
-                    _waveIn = null;
+                    if (_waveIn is not null)
+                    {
+                        _waveIn.DataAvailable -= OnAudioDataAvailable;
+                        _waveIn.StopRecording();
+                        _waveIn.Dispose();
+                        _waveIn = null;
+                    }
                 }
 
                 await _xunfeiApi.StopAndSendLastFrameAsync();
-                var finalText = _currentRecognizedText;
+
+                string finalText;
+                lock (_textLock)
+                {
+                    finalText = _currentRecognizedText;
+                    _currentRecognizedText = string.Empty;
+                }
+
                 Log.Information("停止录音");
 
                 Dispatcher.UIThread.Post(() =>
@@ -208,18 +278,26 @@ public partial class App : Application
                     _ = _overlayWindow.HideWithAnimation();
                     if (string.IsNullOrWhiteSpace(finalText)) return;
 
+                    KeyboardSimulator.SimulateTextEntry(finalText);
                     var clipboard = TopLevel.GetTopLevel(_overlayWindow)?.Clipboard;
                     if (clipboard is not null)
                     {
                         _ = clipboard.SetTextAsync(finalText);
                         Log.Information("识别完成，已写入剪贴板并模拟粘贴。内容长度: {Length}", finalText.Length);
                     }
-
-                    KeyboardSimulator.SimulateTextEntry(finalText);
-                    _currentRecognizedText = string.Empty;
                 });
-            });
-        }
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "停止录音或发送最终帧失败");
+                Dispatcher.UIThread.Post(() => _ = _overlayWindow.HideWithAnimation());
+            }
+            finally
+            {
+                // 无论成功或异常，都必须归位到 Idle
+                Interlocked.Exchange(ref _recordingState, (int)RecordingState.Idle);
+            }
+        });
     }
 
     private void OnAudioDataAvailable(object? sender, WaveInEventArgs e)
@@ -239,6 +317,13 @@ public partial class App : Application
 
     private void DisposeNotifyIcon()
     {
+        // ✅ [改] 加幂等保护，ProcessExit 和 ExitApplication 都调用也不会崩
+        lock (_disposeLock)
+        {
+            if (_notifyIconDisposed) return;
+            _notifyIconDisposed = true;
+        }
+
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
     }
@@ -252,5 +337,13 @@ public partial class App : Application
         {
             desktop.Shutdown();
         }
+    }
+
+    private enum RecordingState
+    {
+        Idle = 0,
+        Connecting = 1,
+        Recording = 2,
+        Stopping = 3
     }
 }

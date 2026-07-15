@@ -3,25 +3,33 @@ using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Threading;
+using Serilog;
 
 namespace VoiceInput.Views;
 
 public partial class TrayMenuWindow : Window
 {
+    private Border _mainBorder = null!;
+    private int _animationToken;
+
     public TrayMenuWindow()
     {
         InitializeComponent();
 
-        Deactivated += async (s, e) => await HideWithAnimation();
+        _mainBorder = this.FindControl<Border>("MainBorder")
+                      ?? throw new InvalidOperationException("找不到控件: MainBorder");
+
+        Deactivated += (s, e) => { _ = HideWithAnimation(); };
     }
 
     public async void ShowWithAnimation(int x, int y)
     {
-        var border = this.FindControl<Border>("MainBorder");
-        if (border == null) return;
+        _animationToken += 1;
+        var currentToken = _animationToken;
 
-        border.Opacity = 0;
-        border.Margin = new Thickness(0, 10, 0, 0);
+        _mainBorder.Opacity = 0;
+        _mainBorder.Margin = new Thickness(0, 10, 0, 0);
 
         Position = new PixelPoint(x, y);
         Topmost = false;
@@ -29,29 +37,36 @@ public partial class TrayMenuWindow : Window
         Show();
         Activate();
 
-        await Task.Delay(10);
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
+        if (_animationToken != currentToken) return;
 
-        border.Opacity = 1;
-        border.Margin = new Thickness(0, 0, 0, 0);
+        _mainBorder.Opacity = 1;
+        _mainBorder.Margin = new Thickness(0);
     }
 
     private async Task HideWithAnimation()
     {
-        var border = this.FindControl<Border>("MainBorder");
-        if (border != null)
-        {
-            border.Opacity = 0;
-            border.Margin = new Thickness(0, 10, 0, 0);
+        _animationToken += 1;
+        var currentToken = _animationToken;
 
-            await Task.Delay(150);
-        }
+        _mainBorder.Opacity = 0;
+        _mainBorder.Margin = new Thickness(0, 10, 0, 0);
 
-        Hide();
+        await Task.Delay(150);
+
+        if (_animationToken == currentToken) Hide();
     }
 
     private async void Exit_Click(object? sender, RoutedEventArgs e)
     {
-        await HideWithAnimation();
-        (Application.Current as App)?.ExitApplication(null, EventArgs.Empty);
+        try
+        {
+            await HideWithAnimation();
+            (Application.Current as App)?.ExitApplication(null, EventArgs.Empty);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "退出时发生异常");
+        }
     }
 }
