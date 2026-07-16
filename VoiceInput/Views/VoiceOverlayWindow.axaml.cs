@@ -10,9 +10,9 @@ namespace VoiceInput.Views;
 
 public partial class VoiceOverlayWindow : Window
 {
-    private Border _mainBorder = null!;
-    private TextBlock _recognizedTextBlock = null!;
-    private Path _micIcon = null!;
+    private readonly Border _mainBorder;
+    private readonly TextBlock _recognizedTextBlock;
+    private readonly Path _micIcon;
 
     private int _animationToken;
 
@@ -44,10 +44,12 @@ public partial class VoiceOverlayWindow : Window
         _mainBorder.Opacity = 0;
         _mainBorder.Margin = new Thickness(0, 20, 0, 0);
 
+        Focusable = false;
+        ShowActivated = false;
         Topmost = false;
         Topmost = true;
-        WindowState = WindowState.Normal;
         Show();
+        
         await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
         if (_animationToken != currentToken) return;
 

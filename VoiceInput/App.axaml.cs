@@ -79,10 +79,8 @@ public partial class App : Application
     {
         _overlayWindow = new VoiceOverlayWindow
         {
-            ShowInTaskbar = false,
-            WindowState = WindowState.Minimized
+            ShowInTaskbar = false
         };
-        _overlayWindow.Show();
 
         _trayMenuWindow = new TrayMenuWindow();
     }
@@ -245,6 +243,7 @@ public partial class App : Application
             Interlocked.Exchange(ref _recordingState, (int)RecordingState.Stopping);
             return;
         }
+
         if (prev != (int)RecordingState.Recording) return;
 
         _ = Task.Run(async () =>

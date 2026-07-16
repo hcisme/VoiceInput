@@ -11,7 +11,7 @@
 
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
         
-        <Version>1.0.4</Version>
+        <Version>1.0.5</Version>
         <Product>VoiceInput</Product>
         <Authors>chihaicheng</Authors>
         <Copyright>Copyright © 2026 chihaicheng</Copyright>
