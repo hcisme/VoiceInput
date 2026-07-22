@@ -47,6 +47,7 @@ public class XunfeiApi : IDisposable
     private ClientWebSocket? _webSocket;
     private CancellationTokenSource? _cts;
     private bool _isFirstFrame = true;
+    private TaskCompletionSource<bool>? _finalResultTcs;
 
     private readonly Dictionary<int, string> _sentenceMap = new();
     public event Action<string>? OnTextChanged;
@@ -66,6 +67,8 @@ public class XunfeiApi : IDisposable
 
         _isFirstFrame = true;
         _sentenceMap.Clear();
+        _finalResultTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
         _cts = new CancellationTokenSource();
         _webSocket = new ClientWebSocket();
 
@@ -148,7 +151,11 @@ public class XunfeiApi : IDisposable
         var json = JsonSerializer.Serialize(requestObj);
         var bytes = Encoding.UTF8.GetBytes(json);
         await _webSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, _cts!.Token);
-        await Task.Delay(180);
+        if (_finalResultTcs != null)
+        {
+            await Task.WhenAny(_finalResultTcs.Task, Task.Delay(2000));
+        }
+
         await CloseAsync();
     }
 
@@ -245,6 +252,11 @@ public class XunfeiApi : IDisposable
                 resultEl.ValueKind == JsonValueKind.Null
                ) return;
 
+            if (dataEl.TryGetProperty("status", out var statusEl) && statusEl.GetInt32() == 2)
+            {
+                _finalResultTcs?.TrySetResult(true);
+            }
+            
             var sn = resultEl.TryGetProperty("sn", out var snEl) ? snEl.GetInt32() : 1;
 
             // 取是追加还是替换 (pgs: apd=追加, rpl=替换)
