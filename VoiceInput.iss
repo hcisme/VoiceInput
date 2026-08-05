@@ -6,7 +6,7 @@
 #define MyPublishDir "D:\code\CSharp\VoiceInput\VoiceInput\bin\Release\net10.0-windows10.0.17763.0\win-x64\publish\"
 
 [Setup]
-AppId={{9A2B4C6D-1E3F-4G5H-6I7J-8K9L0M1N2O3P}
+AppId={{18afa73b-e046-4499-a91f-958effff84e8}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppMutex=VoiceInput_Unique_App_Mutex
@@ -23,7 +23,7 @@ SolidCompression=yes
 PrivilegesRequired=lowest
 
 [Languages]
-Name: "chinesesimp"; MessagesFile: "compiler:Default.isl"
+Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked

@@ -20,21 +20,18 @@ public class MemoryEventSink : ILogEventSink
 
 public static class LoggerManager
 {
-    private const string LogsFolderName = "logs";
-    private const string LogsFileName = "app_log.txt";
     public static MemoryEventSink EventSink { get; } = new();
 
     public static void Initialize()
     {
-        var baseDir = AppContext.BaseDirectory;
-        var logDir = Path.Combine(baseDir, LogsFolderName);
+        var logDir = AppPaths.LogsDirectory;
 
         if (!Directory.Exists(logDir))
         {
             Directory.CreateDirectory(logDir);
         }
 
-        var logFilePath = Path.Combine(logDir, LogsFileName);
+        var logFilePath = AppPaths.LogFilePath;
 
         Log.Logger = new LoggerConfiguration()
             .WriteTo.Console()

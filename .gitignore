@@ -1,7 +1,10 @@
-﻿VoiceInput/config/settings.json
-
+# 构建产物
 [Bb]in/
 [Oo]bj/
+
+# 构建脚本生成的文件
+build.iss
+VoiceInput_Setup_*.exe
 
 *.user
 *.userosscache

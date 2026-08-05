@@ -65,7 +65,7 @@ public partial class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
-        var appName = Assembly.GetExecutingAssembly().GetName().Name ?? "VoiceInput";
+        var appName = Assembly.GetExecutingAssembly().GetName().Name ?? AppPaths.AppName;
 
         InitWindows();
         InitXunfeiApi();
@@ -88,6 +88,15 @@ public partial class App : Application
     private void InitXunfeiApi()
     {
         var config = ConfigManager.LoadConfig();
+
+        if (string.IsNullOrWhiteSpace(config.AppId) ||
+            string.IsNullOrWhiteSpace(config.ApiSecret) ||
+            string.IsNullOrWhiteSpace(config.ApiKey))
+        {
+            Log.Warning("讯飞 API 配置不完整，请编辑 {ConfigPath}，填写 AppId、ApiSecret、ApiKey 后重启程序",
+                AppPaths.ConfigFilePath);
+        }
+
         _xunfeiApi = new XunfeiApi(config.AppId, config.ApiSecret, config.ApiKey);
 
         _xunfeiApi.OnTextChanged += text =>
