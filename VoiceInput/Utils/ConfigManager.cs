@@ -1,29 +1,28 @@
-﻿using Serilog;
-using System;
+﻿using System;
 using System.IO;
 using System.Text.Json;
+using Serilog;
 
 namespace VoiceInput.Utils;
 
 public class AppConfig
 {
-    public string AppId { get; set; } = "81f0b855";
-    public string ApiSecret { get; set; } = "OGFhOGU5YWRiNDIxMDg1MWRiYTMzYmMx";
-    public string ApiKey { get; set; } = "69e751d7b70cb4ff76db75d362b3032b";
+    public string? AppId { get; set; }
+    public string? ApiSecret { get; set; }
+    public string? ApiKey { get; set; }
 }
 
 public static class ConfigManager
 {
-    private static readonly JsonSerializerOptions _jsonOptions = new JsonSerializerOptions
+    private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true
     };
 
     public static AppConfig LoadConfig()
     {
-        var baseDir = AppContext.BaseDirectory;
-        var configDirPath = Path.Combine(baseDir, "config");
-        var configFilePath = Path.Combine(configDirPath, "settings.json");
+        var configDirPath = AppPaths.ConfigDirectory;
+        var configFilePath = AppPaths.ConfigFilePath;
 
         if (!Directory.Exists(configDirPath))
         {
@@ -33,7 +32,7 @@ public static class ConfigManager
         if (!File.Exists(configFilePath))
         {
             var defaultConfig = new AppConfig();
-            var json = JsonSerializer.Serialize(defaultConfig, _jsonOptions);
+            var json = JsonSerializer.Serialize(defaultConfig, JsonOptions);
 
             File.WriteAllText(configFilePath, json);
             return defaultConfig;
@@ -42,7 +41,7 @@ public static class ConfigManager
         try
         {
             var json = File.ReadAllText(configFilePath);
-            return JsonSerializer.Deserialize<AppConfig>(json, _jsonOptions) ?? new AppConfig();
+            return JsonSerializer.Deserialize<AppConfig>(json, JsonOptions) ?? new AppConfig();
         }
         catch (Exception ex)
         {

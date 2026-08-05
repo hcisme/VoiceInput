@@ -9,24 +9,22 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Serilog;
+using VoiceInput.Utils;
 
 namespace VoiceInput.Api;
 
-public class XunfeiApi : IDisposable
+public class XunfeiApi(string? appId, string? apiSecret, string? apiKey) : IDisposable
 {
-    // ✅ [改] 将所有魔法字符串常量提取为 const，集中管理，便于修改
     private const string WssHost = "iat-api.xfyun.cn";
     private const string WssPath = "/v2/iat";
     private const string WssUrl = $"wss://{WssHost}{WssPath}";
 
-    // ✅ [改] business 参数中的配置常量化
     private const string AudioFormat = "audio/L16;rate=16000";
     private const string AudioEncoding = "raw";
     private const string Language = "zh_cn";
     private const string Domain = "iat";
     private const string Accent = "mandarin";
 
-    // ✅ [改] 根据文档说明显式注释每个参数的含义和取值范围
     // ptt：标点符号，0=无标点，1=有标点（默认1）
     private const int Ptt = 1;
 
@@ -40,9 +38,9 @@ public class XunfeiApi : IDisposable
     // nunum：是否将数字转为阿拉伯数字，0=不转换，1=转换（默认1）
     private const int Nunum = 1;
 
-    private readonly string _appId;
-    private readonly string _apiSecret;
-    private readonly string _apiKey;
+    private readonly string _appId = appId ?? string.Empty;
+    private readonly string _apiSecret = apiSecret ?? string.Empty;
+    private readonly string _apiKey = apiKey ?? string.Empty;
 
     private ClientWebSocket? _webSocket;
     private CancellationTokenSource? _cts;
@@ -54,15 +52,17 @@ public class XunfeiApi : IDisposable
 
     private bool _disposed;
 
-    public XunfeiApi(string appId, string apiSecret, string apiKey)
-    {
-        _appId = appId;
-        _apiSecret = apiSecret;
-        _apiKey = apiKey;
-    }
-
     public async Task ConnectAsync()
     {
+        if (string.IsNullOrWhiteSpace(_appId) ||
+            string.IsNullOrWhiteSpace(_apiSecret) ||
+            string.IsNullOrWhiteSpace(_apiKey))
+        {
+            Log.Error("讯飞 API 配置缺失，请先编辑 {ConfigPath}，填写 AppId、ApiSecret、ApiKey",
+                AppPaths.ConfigFilePath);
+            throw new InvalidOperationException("讯飞 API 配置缺失，无法连接");
+        }
+
         await CloseAsync();
 
         _isFirstFrame = true;

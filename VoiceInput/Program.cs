@@ -19,11 +19,11 @@ sealed class Program
     {
         Console.OutputEncoding = Encoding.UTF8;
         LoggerManager.Initialize();
-        _mutex = new Mutex(true, "VoiceInput_Unique_App_Mutex", out var createdNew);
+        _mutex = new Mutex(true, AppPaths.AppMutexName, out var createdNew);
         
         if (!createdNew)
         {
-            Log.Warning("程序已经在运行中，即将退出...");
+            Log.Warning("程序已经在运行中");
             return; 
         }
 
