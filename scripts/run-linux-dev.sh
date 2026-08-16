@@ -24,6 +24,9 @@ sed \
   "$ROOT/packaging/linux/com.chihaicheng.voiceinput.desktop.in" \
   > "$DESKTOP_FILE"
 
+# 开发用 .desktop 只用于让 Portal 识别 app id，不应覆盖安装版快捷方式。
+printf 'NoDisplay=true\n' >> "$DESKTOP_FILE"
+
 chmod +x "$APP_EXEC"
 
 exec systemd-run --user --scope --unit="app-com.chihaicheng.voiceinput-$$" \

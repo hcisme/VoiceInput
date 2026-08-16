@@ -12,15 +12,15 @@ DEB_FILE="$ROOT/dist/VoiceInput_${VERSION}_amd64.deb"
 
 rm -rf "$PACKAGE_DIR"
 mkdir -p "$PACKAGE_DIR/DEBIAN"
-mkdir -p "$PACKAGE_DIR/opt/voiceinput"
+mkdir -p "$PACKAGE_DIR/opt/VoiceInput"
 mkdir -p "$PACKAGE_DIR/usr/bin"
 mkdir -p "$PACKAGE_DIR/usr/share/applications"
 mkdir -p "$PACKAGE_DIR/usr/share/icons/hicolor/256x256/apps"
 
-cp -R "$PUBLISH_DIR/." "$PACKAGE_DIR/opt/voiceinput/"
-chmod +x "$PACKAGE_DIR/opt/voiceinput/VoiceInput"
+cp -R "$PUBLISH_DIR/." "$PACKAGE_DIR/opt/VoiceInput/"
+chmod +x "$PACKAGE_DIR/opt/VoiceInput/VoiceInput"
 
-ln -s ../opt/voiceinput/VoiceInput "$PACKAGE_DIR/usr/bin/voiceinput"
+ln -s /opt/VoiceInput/VoiceInput "$PACKAGE_DIR/usr/bin/voiceinput"
 
 sed "s|@APP_EXEC@|/usr/bin/voiceinput|g" \
   "$ROOT/packaging/linux/com.chihaicheng.voiceinput.desktop.in" \
