@@ -8,7 +8,7 @@ PUBLISH_DIR="$ROOT/VoiceInput/bin/Release/net10.0/linux-x64/publish"
 VERSION="${1:-0.0.0}"
 PACKAGE_NAME="voiceinput"
 PACKAGE_DIR="$ROOT/dist/deb/${PACKAGE_NAME}_${VERSION}_amd64"
-DEB_FILE="$ROOT/dist/${PACKAGE_NAME}_${VERSION}_amd64.deb"
+DEB_FILE="$ROOT/dist/VoiceInput_${VERSION}_amd64.deb"
 
 rm -rf "$PACKAGE_DIR"
 mkdir -p "$PACKAGE_DIR/DEBIAN"
