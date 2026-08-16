@@ -42,15 +42,16 @@ jobs:
             libwayland-client0
 
       - name: Publish Linux x64
-        run: >
-          dotnet publish VoiceInput/VoiceInput.csproj
-          -c Release
-          -f net10.0
-          -r linux-x64
-          --self-contained true
-          -p:DebugType=none
-          -p:EnableWindowsTargeting=true
-          -p:Version="${{ github.ref_name }}"
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          dotnet publish VoiceInput/VoiceInput.csproj \
+            -c Release \
+            -f net10.0 \
+            -r linux-x64 \
+            --self-contained true \
+            -p:DebugType=none \
+            -p:EnableWindowsTargeting=true \
+            -p:Version="$VERSION"
 
       - name: Package .deb
         run: |
