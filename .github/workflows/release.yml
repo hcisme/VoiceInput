@@ -1,4 +1,4 @@
-name: Build Ubuntu
+name: release
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  linux:
     name: Build Ubuntu .deb
     runs-on: ubuntu-latest
 
@@ -58,6 +58,50 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           ./build/linux/build-deb.sh "$VERSION"
 
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VoiceInput-deb
+          path: dist/VoiceInput_*_amd64.deb
+
+  windows:
+    name: Build Windows installer
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build Installer
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          ./build/windows/build.ps1 -Version $version
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VoiceInput-exe
+          path: VoiceInput_Setup_v*.exe
+
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs:
+      - linux
+      - windows
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
       - name: Delete existing release if present
         env:
           GH_TOKEN: ${{ github.token }}
@@ -66,4 +110,6 @@ jobs:
       - name: Upload Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/VoiceInput_*_amd64.deb
+          files: |
+            release-artifacts/VoiceInput-deb/VoiceInput_*_amd64.deb
+            release-artifacts/VoiceInput-exe/VoiceInput_Setup_v*.exe
