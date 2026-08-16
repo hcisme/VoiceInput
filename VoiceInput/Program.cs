@@ -31,6 +31,12 @@ sealed class Program
         {
             BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
         }
+        catch (OperationCanceledException ex)
+        {
+            // Linux 托盘退出时，Avalonia 的 DBusTrayIconImpl.WatchAsync() 可能抛出
+            // TaskCanceledException，这是退出路径中的预期取消，不应记录为致命崩溃。
+            Log.Debug(ex, "应用退出过程中发生预期取消。");
+        }
         catch (Exception ex)
         {
             Log.Fatal(ex, "程序发生未处理的崩溃异常！");
@@ -44,11 +50,23 @@ sealed class Program
 
     // Avalonia configuration, don't remove; also used by visual designer.
     public static AppBuilder BuildAvaloniaApp()
-        => AppBuilder.Configure<App>()
-            .UsePlatformDetect()
+    {
+        var builder = AppBuilder.Configure<App>()
+            .UsePlatformDetect();
+
+#if !WINDOWS
+        if (OperatingSystem.IsLinux()
+            && Environment.GetEnvironmentVariable("WAYLAND_DISPLAY") is { Length: > 0 })
+        {
+            builder = builder.UseWayland();
+        }
+#endif
+
+        return builder
 #if DEBUG
             .WithDeveloperTools()
 #endif
             .WithInterFont()
             .LogToTrace();
+    }
 }
