@@ -61,4 +61,4 @@ jobs:
       - name: Upload Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/voiceinput_*_amd64.deb
+          files: dist/VoiceInput_*_amd64.deb
