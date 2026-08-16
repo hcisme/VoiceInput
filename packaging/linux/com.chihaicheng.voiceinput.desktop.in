@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=VoiceInput
+Comment=跨平台语音输入工具
+Exec=@APP_EXEC@
+Icon=com.chihaicheng.voiceinput
+Terminal=false
+Categories=Utility;
+StartupWMClass=VoiceInput
+X-GNOME-UsesNotifications=true

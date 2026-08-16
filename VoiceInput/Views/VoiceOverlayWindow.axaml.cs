@@ -36,11 +36,8 @@ public partial class VoiceOverlayWindow : Window
         UpdatePosition();
     }
 
-    public async Task ShowWithAnimation()
+    public void ShowWithAnimation()
     {
-        _animationToken += 1;
-        var currentToken = _animationToken;
-
         _mainBorder.Opacity = 0;
         _mainBorder.Margin = new Thickness(0, 20, 0, 0);
 
@@ -49,9 +46,8 @@ public partial class VoiceOverlayWindow : Window
         Topmost = false;
         Topmost = true;
         Show();
-        
-        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
-        if (_animationToken != currentToken) return;
+        UpdatePosition();
+        Dispatcher.UIThread.Post(UpdatePosition, DispatcherPriority.Render);
 
         _mainBorder.Opacity = 1;
         _mainBorder.Margin = new Thickness(0);
@@ -65,7 +61,7 @@ public partial class VoiceOverlayWindow : Window
         _mainBorder.Opacity = 0;
         _mainBorder.Margin = new Thickness(0, 20, 0, 0);
 
-        await Task.Delay(150);
+        await Task.Delay(100);
         if (_animationToken == currentToken)
         {
             Hide();
@@ -112,8 +108,10 @@ public partial class VoiceOverlayWindow : Window
             var windowWidth = (int)Bounds.Width;
             var windowHeight = (int)Bounds.Height;
 
-            // 如果窗口还没渲染出来，宽高是 0，跳过计算
-            if (windowWidth == 0 || windowHeight == 0) return;
+            // 首次显示时可能还没有完成布局，使用接近实际内容的默认尺寸，
+            // 避免 Avalonia/Wayland 把窗口临时放到屏幕中间。
+            if (windowWidth <= 0) windowWidth = 50;
+            if (windowHeight <= 0) windowHeight = 70;
 
             // X 轴：屏幕宽度的一半 减去 窗口宽度的一半
             var x = workArea.X + (workArea.Width - windowWidth) / 2;
