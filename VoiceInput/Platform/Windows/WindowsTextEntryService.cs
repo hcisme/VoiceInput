@@ -1,11 +1,11 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Serilog;
 
-namespace VoiceInput.Utils;
+namespace VoiceInput.Platform.Windows;
 
-public static partial class KeyboardSimulator
+public sealed partial class WindowsTextEntryService : ITextEntryService
 {
     [LibraryImport("user32.dll", SetLastError = true)]
     private static partial uint SendInput(uint nInputs, Input[] pInputs, int cbSize);
@@ -21,13 +21,13 @@ public static partial class KeyboardSimulator
     [StructLayout(LayoutKind.Explicit)]
     private struct InputUnion
     {
-        [FieldOffset(0)] public Mouseinput mi;
-        [FieldOffset(0)] public Keybdinput ki;
-        [FieldOffset(0)] public Hardwareinput hi;
+        [FieldOffset(0)] public MouseInput mi;
+        [FieldOffset(0)] public KeybdInput ki;
+        [FieldOffset(0)] public HardwareInput hi;
     }
-    
+
     [StructLayout(LayoutKind.Sequential)]
-    private struct Mouseinput
+    private struct MouseInput
     {
         public int dx;
         public int dy;
@@ -36,9 +36,9 @@ public static partial class KeyboardSimulator
         public uint time;
         public IntPtr dwExtraInfo;
     }
-    
+
     [StructLayout(LayoutKind.Sequential)]
-    private struct Keybdinput
+    private struct KeybdInput
     {
         public ushort wVk;
         public ushort wScan;
@@ -48,18 +48,20 @@ public static partial class KeyboardSimulator
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct Hardwareinput
+    private struct HardwareInput
     {
         public uint uMsg;
         public ushort wParamL;
         public ushort wParamH;
     }
-    
-    private const uint INPUT_KEYBOARD = 1;
-    private const uint KEYEVENTF_UNICODE = 0x0004;
-    private const uint KEYEVENTF_KEYUP = 0x0002;
 
-    public static void SimulateTextEntry(string text)
+    private const uint InputKeyboard = 1;
+    private const uint KeyEventUnicode = 0x0004;
+    private const uint KeyEventKeyUp = 0x0002;
+
+    public bool IsSupported => OperatingSystem.IsWindows();
+
+    public void SimulateTextEntry(string text)
     {
         if (string.IsNullOrEmpty(text)) return;
 
@@ -67,13 +69,13 @@ public static partial class KeyboardSimulator
 
         foreach (var c in text)
         {
-            var down = new Input { type = INPUT_KEYBOARD };
+            var down = new Input { type = InputKeyboard };
             down.U.ki.wScan = c;
-            down.U.ki.dwFlags = KEYEVENTF_UNICODE;
+            down.U.ki.dwFlags = KeyEventUnicode;
 
-            var up = new Input { type = INPUT_KEYBOARD };
+            var up = new Input { type = InputKeyboard };
             up.U.ki.wScan = c;
-            up.U.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
+            up.U.ki.dwFlags = KeyEventUnicode | KeyEventKeyUp;
 
             inputs.Add(down);
             inputs.Add(up);
@@ -82,6 +84,7 @@ public static partial class KeyboardSimulator
         var result = SendInput((uint)inputs.Count, inputs.ToArray(), Input.Size);
 
         if (result != 0) return;
+
         var errorCode = Marshal.GetLastPInvokeError();
         Log.Error("底层键盘模拟发送失败！错误码: {ErrorCode}", errorCode);
     }

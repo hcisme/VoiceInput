@@ -5,8 +5,9 @@ namespace VoiceInput.Utils;
 
 /// <summary>
 /// 集中管理应用的常量与路径。
-/// 配置存放在 %APPDATA%\VoiceInput 下，日志存放在 %LOCALAPPDATA%\VoiceInput 下，
-/// 避免写入安装目录（Program Files / 应用目录）造成权限问题。
+/// Windows 下配置存放在 %APPDATA%\VoiceInput，日志存放在 %LOCALAPPDATA%\VoiceInput；
+/// Linux 下通常对应 ~/.config/VoiceInput 和 ~/.local/share/VoiceInput。
+/// 统一避免写入安装目录，降低权限问题。
 /// </summary>
 public static class AppPaths
 {
