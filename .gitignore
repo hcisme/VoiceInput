@@ -1,10 +1,27 @@
 # 构建产物
 [Bb]in/
 [Oo]bj/
+[Pp]ublish/
+artifacts/
+TestResults/
+coverage/
 
 # 构建脚本生成的文件
 build.iss
 VoiceInput_Setup_*.exe
+
+# Linux 打包产物
+dist/
+*.deb
+*.tar.gz
+*.tar.xz
+*.zip
+*.nupkg
+*.snupkg
+
+# Codex / 代理工作目录
+.codex/
+.agents/
 
 *.user
 *.userosscache
@@ -13,6 +30,7 @@ VoiceInput_Setup_*.exe
 *.cache
 
 .idea/
+.vs/
 *.sln.DotSettings.user
 *.sln.DotSettings
 
@@ -23,3 +41,7 @@ Desktop.ini
 
 # Mac
 .DS_Store
+
+# Linux
+core
+core.*

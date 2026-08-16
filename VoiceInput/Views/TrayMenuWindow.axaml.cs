@@ -23,11 +23,8 @@ public partial class TrayMenuWindow : Window
         Deactivated += (s, e) => { _ = HideWithAnimation(); };
     }
 
-    public async void ShowWithAnimation(int x, int y)
+    public void ShowWithAnimation(int x, int y)
     {
-        _animationToken += 1;
-        var currentToken = _animationToken;
-
         _mainBorder.Opacity = 0;
         _mainBorder.Margin = new Thickness(0, 10, 0, 0);
 
@@ -36,9 +33,6 @@ public partial class TrayMenuWindow : Window
         Topmost = true;
         Show();
         Activate();
-
-        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
-        if (_animationToken != currentToken) return;
 
         _mainBorder.Opacity = 1;
         _mainBorder.Margin = new Thickness(0);
@@ -52,7 +46,7 @@ public partial class TrayMenuWindow : Window
         _mainBorder.Opacity = 0;
         _mainBorder.Margin = new Thickness(0, 10, 0, 0);
 
-        await Task.Delay(150);
+        await Task.Delay(100);
 
         if (_animationToken == currentToken) Hide();
     }

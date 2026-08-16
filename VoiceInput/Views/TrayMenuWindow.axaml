@@ -1,6 +1,8 @@
 ﻿<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="VoiceInput.Views.TrayMenuWindow"
+        Title="VoiceInput"
+        Icon="/Assets/voiceinput.png"
         WindowDecorations="None"
         Topmost="True"
         ShowInTaskbar="False"
@@ -8,7 +10,8 @@
         TransparencyLevelHint="Transparent"
         SizeToContent="WidthAndHeight"
         MinWidth="120"
-        CanResize="False">
+        CanResize="False"
+        WindowStartupLocation="Manual">
 
     <Window.Styles>
         <Style Selector="Button">
@@ -37,8 +40,8 @@
             Margin="0,10,0,0">
         <Border.Transitions>
             <Transitions>
-                <DoubleTransition Property="Opacity" Duration="0:0:0.15" />
-                <ThicknessTransition Property="Margin" Duration="0:0:0.15" />
+                <DoubleTransition Property="Opacity" Duration="0:0:0.08" />
+                <ThicknessTransition Property="Margin" Duration="0:0:0.08" />
             </Transitions>
         </Border.Transitions>
 

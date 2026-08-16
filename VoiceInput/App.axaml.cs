@@ -1,7 +1,5 @@
 using System;
-using System.Drawing;
 using System.Reflection;
-using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
@@ -10,79 +8,63 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Input.Platform;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
-using NAudio.Wave;
 using Serilog;
-using SharpHook;
-using SharpHook.Data;
 using VoiceInput.Api;
+using VoiceInput.Platform;
 using VoiceInput.Utils;
 using VoiceInput.Views;
-using WinForms = System.Windows.Forms;
 
 namespace VoiceInput;
 
 public partial class App : Application
 {
-    private const int AudioSampleRate = 16000;
-    private const int AudioBitsPerSample = 16;
-    private const int AudioChannels = 1;
-    private const float AudioNormalizeFactor = 32768f;
+    private const int AudioNormalizeFactor = 32768;
 
     private VoiceOverlayWindow _overlayWindow = null!;
     private TrayMenuWindow _trayMenuWindow = null!;
-    private WinForms.NotifyIcon _notifyIcon = null!;
     private XunfeiApi _xunfeiApi = null!;
 
-    private TaskPoolGlobalHook? _globalHook;
-    private WaveInEvent? _waveIn;
-    private readonly object _waveInLock = new();
+    private ITrayService _trayService = null!;
+    private IAudioCaptureService _audioCaptureService = null!;
+    private ITextEntryService _textEntryService = null!;
+    private IGlobalHotkeyService _globalHotkeyService = null!;
 
     // 状态
     private string _currentRecognizedText = string.Empty;
     private readonly object _textLock = new();
-    private volatile bool _isCtrlPressed;
-    private volatile bool _isWinPressed;
     private int _recordingState = (int)RecordingState.Idle;
-
-    private bool _notifyIconDisposed;
-    private readonly object _disposeLock = new();
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetCursorPos(out Point pt);
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct Point
-    {
-        public int X;
-        public int Y;
-    }
 
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
+        Dispatcher.UIThread.UnhandledException += OnDispatcherUnhandledException;
+    }
+
+    private void OnDispatcherUnhandledException(object? sender,
+        DispatcherUnhandledExceptionEventArgs e)
+    {
+        // Linux 托盘图标在应用退出时，Avalonia 的 DBusTrayIconImpl.WatchAsync()
+        // 会因为会话取消抛出 TaskCanceledException。这是退出路径中的预期取消，
+        // 不应被当成致命崩溃。
+        if (e.Exception is OperationCanceledException)
+        {
+            Log.Debug(e.Exception, "应用退出过程中取消了 UI 线程异步操作。");
+            e.Handled = true;
+            return;
+        }
+
+        Log.Error(e.Exception, "UI 线程发生未处理异常。");
     }
 
     public override void OnFrameworkInitializationCompleted()
     {
         var appName = Assembly.GetExecutingAssembly().GetName().Name ?? AppPaths.AppName;
 
-        InitWindows();
         InitXunfeiApi();
-        InitTrayIcon(appName);
-        InitLifecycleAndHook();
+        InitPlatformServices(appName);
+        InitLifecycleAndHotkey();
 
         base.OnFrameworkInitializationCompleted();
-    }
-
-    private void InitWindows()
-    {
-        _overlayWindow = new VoiceOverlayWindow
-        {
-            ShowInTaskbar = false
-        };
-
-        _trayMenuWindow = new TrayMenuWindow();
     }
 
     private void InitXunfeiApi()
@@ -106,79 +88,73 @@ public partial class App : Application
                 _currentRecognizedText = text;
             }
 
-            Dispatcher.UIThread.Post(() => _overlayWindow.UpdateText(text));
+            Dispatcher.UIThread.Post(() => GetOrCreateOverlayWindow().UpdateText(text));
         };
     }
 
-    private void InitTrayIcon(string appName)
+    private VoiceOverlayWindow GetOrCreateOverlayWindow()
     {
-        var processPath = Environment.ProcessPath;
-        _notifyIcon = new WinForms.NotifyIcon
+        return _overlayWindow ??= new VoiceOverlayWindow
         {
-            Icon = string.IsNullOrEmpty(processPath)
-                ? SystemIcons.Application
-                : Icon.ExtractAssociatedIcon(processPath),
-            Text = appName,
-            Visible = true
+            ShowInTaskbar = false
         };
-
-        _notifyIcon.MouseClick += (_, e) =>
-        {
-            if (e.Button == WinForms.MouseButtons.Right)
-            {
-                Dispatcher.UIThread.Post(() =>
-                {
-                    if (GetCursorPos(out var pt))
-                    {
-                        _trayMenuWindow.ShowWithAnimation(pt.X - 100, pt.Y - 50);
-                    }
-                });
-            }
-        };
-
-        AppDomain.CurrentDomain.ProcessExit += (_, _) => DisposeNotifyIcon();
     }
 
-    private void InitLifecycleAndHook()
+    private TrayMenuWindow GetOrCreateTrayMenuWindow()
+    {
+        return _trayMenuWindow ??= new TrayMenuWindow();
+    }
+
+    private void InitPlatformServices(string appName)
+    {
+        _trayService = PlatformServices.CreateTrayService();
+        _audioCaptureService = PlatformServices.CreateAudioCaptureService();
+        _textEntryService = PlatformServices.CreateTextEntryService();
+        _globalHotkeyService = PlatformServices.CreateGlobalHotkeyService();
+
+        _audioCaptureService.DataAvailable += OnAudioDataAvailable;
+        _trayService.Initialize(
+            appName,
+            ShowTrayMenu,
+            () => ExitApplication(null, EventArgs.Empty));
+
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => _trayService.Dispose();
+    }
+
+    private void ShowTrayMenu(int x, int y)
+    {
+        var trayMenuWindow = GetOrCreateTrayMenuWindow();
+
+        if (x < 0 || y < 0)
+        {
+            var screen = trayMenuWindow.Screens?.Primary;
+
+            x = screen?.WorkingArea.X ?? 100;
+            y = (screen?.WorkingArea.Bottom ?? 100) - 60;
+        }
+        else
+        {
+            x -= 100;
+            y -= 50;
+        }
+
+        trayMenuWindow.ShowWithAnimation(x, y);
+    }
+
+    private void InitLifecycleAndHotkey()
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
-            StartKeyboardHook();
+
+            _globalHotkeyService.HotkeyPressed += OnHotkeyPressed;
+            _globalHotkeyService.HotkeyReleased += OnHotkeyReleased;
+            _globalHotkeyService.Start();
         }
     }
 
-    /// <summary>
-    /// 每次按下ctrl win 都会初始化一次
-    /// </summary>
-    private void InitMicrophone()
+    private void OnHotkeyPressed(object? sender, EventArgs e)
     {
-        var waveIn = new WaveInEvent
-        {
-            WaveFormat = new WaveFormat(AudioSampleRate, AudioBitsPerSample, AudioChannels)
-        };
-        waveIn.DataAvailable += OnAudioDataAvailable;
-
-        lock (_waveInLock)
-        {
-            _waveIn = waveIn;
-        }
-    }
-
-    private void StartKeyboardHook()
-    {
-        _globalHook = new TaskPoolGlobalHook();
-        _globalHook.KeyPressed += OnKeyPressed;
-        _globalHook.KeyReleased += OnKeyReleased;
-        _globalHook.RunAsync();
-    }
-
-    private void OnKeyPressed(object? sender, KeyboardHookEventArgs e)
-    {
-        if (e.Data.KeyCode is KeyCode.VcLeftControl or KeyCode.VcRightControl) _isCtrlPressed = true;
-        if (e.Data.KeyCode is KeyCode.VcLeftMeta or KeyCode.VcRightMeta) _isWinPressed = true;
-        if (!_isCtrlPressed || !_isWinPressed) return;
-
         // 只允许从 Idle → Connecting，防止重复触发
         if (Interlocked.CompareExchange(
                 ref _recordingState,
@@ -198,29 +174,25 @@ public partial class App : Application
         {
             Dispatcher.UIThread.Post(() =>
             {
-                _overlayWindow.UpdateText(string.Empty);
-                _ = _overlayWindow.ShowWithAnimation();
+                var overlayWindow = GetOrCreateOverlayWindow();
+                overlayWindow.UpdateText(string.Empty);
+                overlayWindow.ShowWithAnimation();
             });
 
             try
             {
                 await _xunfeiApi.ConnectAsync();
 
-                // 连接期间若用户已松键（Stopping），立即终止，防止 _waveIn 泄露
+                // 连接期间若用户已松键（Stopping），立即终止，防止录音服务空转
                 if (_recordingState == (int)RecordingState.Stopping)
                 {
                     await _xunfeiApi.StopAndSendLastFrameAsync();
-                    Dispatcher.UIThread.Post(() => _ = _overlayWindow.HideWithAnimation());
+                    Dispatcher.UIThread.Post(() => _ = GetOrCreateOverlayWindow().HideWithAnimation());
                     Interlocked.Exchange(ref _recordingState, (int)RecordingState.Idle);
                     return;
                 }
 
-                InitMicrophone();
-
-                lock (_waveInLock)
-                {
-                    _waveIn?.StartRecording();
-                }
+                _audioCaptureService.Start();
 
                 Interlocked.Exchange(ref _recordingState, (int)RecordingState.Recording);
                 Log.Information("开始录音...");
@@ -228,25 +200,22 @@ public partial class App : Application
             catch (Exception ex)
             {
                 Log.Error(ex, "连接讯飞 API 或初始化麦克风失败！");
-                // 异常时回退状态 并 收起界面
+                // 异常时回退状态并收起界面
                 Interlocked.Exchange(ref _recordingState, (int)RecordingState.Idle);
-                Dispatcher.UIThread.Post(() => _ = _overlayWindow.HideWithAnimation());
+                Dispatcher.UIThread.Post(() => _ = GetOrCreateOverlayWindow().HideWithAnimation());
             }
         });
     }
 
-    private void OnKeyReleased(object? sender, KeyboardHookEventArgs e)
+    private void OnHotkeyReleased(object? sender, EventArgs e)
     {
-        if (e.Data.KeyCode is KeyCode.VcLeftControl or KeyCode.VcRightControl) _isCtrlPressed = false;
-        if (e.Data.KeyCode is KeyCode.VcLeftMeta or KeyCode.VcRightMeta) _isWinPressed = false;
-        if (_isCtrlPressed && _isWinPressed) return;
-
         var prev = Interlocked.CompareExchange(
             ref _recordingState,
             (int)RecordingState.Stopping,
             (int)RecordingState.Recording);
 
         if (prev == (int)RecordingState.Idle) return;
+
         if (prev == (int)RecordingState.Connecting)
         {
             Interlocked.Exchange(ref _recordingState, (int)RecordingState.Stopping);
@@ -259,17 +228,7 @@ public partial class App : Application
         {
             try
             {
-                lock (_waveInLock)
-                {
-                    if (_waveIn is not null)
-                    {
-                        _waveIn.DataAvailable -= OnAudioDataAvailable;
-                        _waveIn.StopRecording();
-                        _waveIn.Dispose();
-                        _waveIn = null;
-                    }
-                }
-
+                _audioCaptureService.Stop();
                 await _xunfeiApi.StopAndSendLastFrameAsync();
 
                 string finalText;
@@ -281,24 +240,38 @@ public partial class App : Application
 
                 Log.Information("停止录音");
 
-                Dispatcher.UIThread.Post(() =>
+                Dispatcher.UIThread.Post(async () =>
                 {
-                    _ = _overlayWindow.HideWithAnimation();
-                    if (string.IsNullOrWhiteSpace(finalText)) return;
+                    var overlayWindow = GetOrCreateOverlayWindow();
+                    if (string.IsNullOrWhiteSpace(finalText))
+                    {
+                        await overlayWindow.HideWithAnimation();
+                        return;
+                    }
 
-                    KeyboardSimulator.SimulateTextEntry(finalText);
-                    var clipboard = TopLevel.GetTopLevel(_overlayWindow)?.Clipboard;
+                    var clipboard = TopLevel.GetTopLevel(overlayWindow)?.Clipboard;
                     if (clipboard is not null)
                     {
-                        _ = clipboard.SetTextAsync(finalText);
-                        Log.Information("识别完成，已写入剪贴板并模拟粘贴。内容长度: {Length}", finalText.Length);
+                        await clipboard.SetTextAsync(finalText);
+                    }
+
+                    if (_textEntryService.IsSupported)
+                    {
+                        _textEntryService.SimulateTextEntry(finalText);
+                        Log.Information("识别完成，已写入剪贴板并模拟输入。内容长度: {Length}", finalText.Length);
+                        await overlayWindow.HideWithAnimation();
+                    }
+                    else
+                    {
+                        Log.Information("识别完成，已写入剪贴板。内容长度: {Length}", finalText.Length);
+                        await overlayWindow.HideWithAnimation();
                     }
                 });
             }
             catch (Exception ex)
             {
                 Log.Error(ex, "停止录音或发送最终帧失败");
-                Dispatcher.UIThread.Post(() => _ = _overlayWindow.HideWithAnimation());
+                Dispatcher.UIThread.Post(() => _ = GetOrCreateOverlayWindow().HideWithAnimation());
             }
             finally
             {
@@ -308,38 +281,25 @@ public partial class App : Application
         });
     }
 
-    private void OnAudioDataAvailable(object? sender, WaveInEventArgs e)
+    private void OnAudioDataAvailable(byte[] buffer, int bytesRecorded)
     {
-        _ = _xunfeiApi.SendAudioDataAsync(e.Buffer, e.BytesRecorded);
+        _ = _xunfeiApi.SendAudioDataAsync(buffer, bytesRecorded);
 
         float maxVolume = 0;
-        for (var i = 0; i < e.BytesRecorded; i += 2)
+        for (var i = 0; i < bytesRecorded; i += 2)
         {
-            var sample = BitConverter.ToInt16(e.Buffer, i);
-            var val = Math.Abs(sample / AudioNormalizeFactor);
+            var sample = BitConverter.ToInt16(buffer, i);
+            var val = Math.Abs(sample / (float)AudioNormalizeFactor);
             if (val > maxVolume) maxVolume = val;
         }
 
-        Dispatcher.UIThread.Post(() => _overlayWindow.UpdateVolume(maxVolume));
-    }
-
-    private void DisposeNotifyIcon()
-    {
-        // ✅ [改] 加幂等保护，ProcessExit 和 ExitApplication 都调用也不会崩
-        lock (_disposeLock)
-        {
-            if (_notifyIconDisposed) return;
-            _notifyIconDisposed = true;
-        }
-
-        _notifyIcon.Visible = false;
-        _notifyIcon.Dispose();
+        Dispatcher.UIThread.Post(() => GetOrCreateOverlayWindow().UpdateVolume(maxVolume));
     }
 
     public void ExitApplication(object? sender, EventArgs e)
     {
-        _globalHook?.Dispose();
-        DisposeNotifyIcon();
+        _globalHotkeyService?.Dispose();
+        _trayService?.Dispose();
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
