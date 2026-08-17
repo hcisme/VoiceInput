@@ -8,6 +8,7 @@ public sealed class WindowsAudioCaptureService : IAudioCaptureService
     private const int AudioSampleRate = 16000;
     private const int AudioBitsPerSample = 16;
     private const int AudioChannels = 1;
+    private const int AudioBufferMilliseconds = 40;
 
     private WaveInEvent? _waveIn;
     private readonly object _waveInLock = new();
@@ -23,7 +24,8 @@ public sealed class WindowsAudioCaptureService : IAudioCaptureService
 
             _waveIn = new WaveInEvent
             {
-                WaveFormat = new WaveFormat(AudioSampleRate, AudioBitsPerSample, AudioChannels)
+                WaveFormat = new WaveFormat(AudioSampleRate, AudioBitsPerSample, AudioChannels),
+                BufferMilliseconds = AudioBufferMilliseconds
             };
             _waveIn.DataAvailable += OnDataAvailable;
             _waveIn.StartRecording();
