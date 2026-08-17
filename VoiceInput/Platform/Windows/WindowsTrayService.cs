@@ -63,7 +63,7 @@ public sealed class WindowsTrayService : ITrayService
 
         if (GetCursorPos(out var pt))
         {
-            _showMenuAt(pt.X - 100, pt.Y - 50);
+            _showMenuAt(pt.X, pt.Y);
         }
     }
 }
