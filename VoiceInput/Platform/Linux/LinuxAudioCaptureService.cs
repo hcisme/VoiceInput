@@ -18,9 +18,9 @@ public sealed class LinuxAudioCaptureService : IAudioCaptureService
     private const int AudioFormatS16Le = 2;
     private const int AudioAccessRwInterleaved = 3;
     private const int AudioStreamCapture = 1;
-    private const uint AudioLatencyMicroseconds = 200_000;
+    private const uint AudioLatencyMicroseconds = 40_000;
 
-    private const int FramesPerBuffer = 4096;
+    private const int FramesPerBuffer = 640;
 
     private readonly object _gate = new();
     private IntPtr _pcm;
@@ -149,6 +149,13 @@ public sealed class LinuxAudioCaptureService : IAudioCaptureService
                     var bytesRecorded = (int)frames * AudioChannels * sizeof(short);
                     DataAvailable?.Invoke(buffer, bytesRecorded);
                     continue;
+                }
+
+                // Stop() 会在另一个线程调用 snd_pcm_drop，阻塞中的 readi 可能返回
+                // -EBADFD(-77)，这是正常停止路径，不要再调用 prepare 恢复。
+                if (!_running)
+                {
+                    break;
                 }
 
                 if (frames == 0)

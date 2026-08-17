@@ -29,6 +29,9 @@ public partial class App : Application
     private ITextEntryService _textEntryService = null!;
     private IGlobalHotkeyService _globalHotkeyService = null!;
 
+    private readonly object _audioSendGate = new();
+    private Task _audioSendTail = Task.CompletedTask;
+
     // 状态
     private string _currentRecognizedText = string.Empty;
     private readonly object _textLock = new();
@@ -229,6 +232,7 @@ public partial class App : Application
             try
             {
                 _audioCaptureService.Stop();
+                await DrainPendingAudioSendsAsync();
                 await _xunfeiApi.StopAndSendLastFrameAsync();
 
                 string finalText;
@@ -283,7 +287,9 @@ public partial class App : Application
 
     private void OnAudioDataAvailable(byte[] buffer, int bytesRecorded)
     {
-        _ = _xunfeiApi.SendAudioDataAsync(buffer, bytesRecorded);
+        var audioChunk = new byte[bytesRecorded];
+        Buffer.BlockCopy(buffer, 0, audioChunk, 0, bytesRecorded);
+        _ = SendAudioSequentiallyAsync(audioChunk, bytesRecorded);
 
         float maxVolume = 0;
         for (var i = 0; i < bytesRecorded; i += 2)
@@ -294,6 +300,49 @@ public partial class App : Application
         }
 
         Dispatcher.UIThread.Post(() => GetOrCreateOverlayWindow().UpdateVolume(maxVolume));
+    }
+
+    private Task SendAudioSequentiallyAsync(byte[] audioData, int length)
+    {
+        lock (_audioSendGate)
+        {
+            var previous = _audioSendTail;
+            var current = SendAfterPreviousAsync(previous, audioData, length);
+            _audioSendTail = current;
+            return current;
+        }
+    }
+
+    private async Task SendAfterPreviousAsync(Task previous, byte[] audioData, int length)
+    {
+        try
+        {
+            await previous.ConfigureAwait(false);
+        }
+        catch
+        {
+            // 单次发送失败不应阻断后续音频；连接状态由 XunfeiApi 内部判断。
+        }
+
+        await _xunfeiApi.SendAudioDataAsync(audioData, length);
+    }
+
+    private async Task DrainPendingAudioSendsAsync()
+    {
+        Task tail;
+        lock (_audioSendGate)
+        {
+            tail = _audioSendTail;
+        }
+
+        try
+        {
+            await tail.ConfigureAwait(false);
+        }
+        catch
+        {
+            // 停录阶段仅确保已入队音频尽量发完，单次失败不阻塞最终帧。
+        }
     }
 
     public void ExitApplication(object? sender, EventArgs e)
