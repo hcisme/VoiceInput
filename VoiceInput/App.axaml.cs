@@ -19,8 +19,6 @@ namespace VoiceInput;
 
 public partial class App : Application
 {
-    private const int AudioNormalizeFactor = 32768;
-
     private VoiceOverlayWindow _overlayWindow = null!;
     private TrayMenuWindow _trayMenuWindow = null!;
     private XunfeiApi _xunfeiApi = null!;
@@ -297,16 +295,6 @@ public partial class App : Application
         var audioChunk = ArrayPool<byte>.Shared.Rent(bytesRecorded);
         Buffer.BlockCopy(buffer, 0, audioChunk, 0, bytesRecorded);
         _ = SendAudioSequentiallyAsync(audioChunk, bytesRecorded);
-
-        float maxVolume = 0;
-        for (var i = 0; i < bytesRecorded; i += 2)
-        {
-            var sample = BitConverter.ToInt16(buffer, i);
-            var val = Math.Abs(sample / (float)AudioNormalizeFactor);
-            if (val > maxVolume) maxVolume = val;
-        }
-
-        Dispatcher.UIThread.Post(() => GetOrCreateOverlayWindow().UpdateVolume(maxVolume));
     }
 
     private Task SendAudioSequentiallyAsync(byte[] audioData, int length)
