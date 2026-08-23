@@ -196,7 +196,13 @@ public partial class App : Application
                     return;
                 }
 
-                _audioCaptureService.Start();
+                if (!_audioCaptureService.Start())
+                {
+                    Log.Error("录音服务启动失败，无法开始录音");
+                    Interlocked.Exchange(ref _recordingState, (int)RecordingState.Idle);
+                    Dispatcher.UIThread.Post(() => _ = GetOrCreateOverlayWindow().HideWithAnimation());
+                    return;
+                }
 
                 Interlocked.Exchange(ref _recordingState, (int)RecordingState.Recording);
                 Log.Information("开始录音...");

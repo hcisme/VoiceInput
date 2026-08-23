@@ -1,5 +1,6 @@
 ﻿using System;
 using NAudio.Wave;
+using Serilog;
 
 namespace VoiceInput.Platform.Windows;
 
@@ -16,19 +17,31 @@ public sealed class WindowsAudioCaptureService : IAudioCaptureService
 
     public event Action<byte[], int>? DataAvailable;
 
-    public void Start()
+    public bool Start()
     {
         lock (_waveInLock)
         {
-            if (_disposed || _waveIn is not null) return;
+            if (_disposed) return false;
+            if (_waveIn is not null) return true;
 
-            _waveIn = new WaveInEvent
+            try
             {
-                WaveFormat = new WaveFormat(AudioSampleRate, AudioBitsPerSample, AudioChannels),
-                BufferMilliseconds = AudioBufferMilliseconds
-            };
-            _waveIn.DataAvailable += OnDataAvailable;
-            _waveIn.StartRecording();
+                _waveIn = new WaveInEvent
+                {
+                    WaveFormat = new WaveFormat(AudioSampleRate, AudioBitsPerSample, AudioChannels),
+                    BufferMilliseconds = AudioBufferMilliseconds
+                };
+                _waveIn.DataAvailable += OnDataAvailable;
+                _waveIn.StartRecording();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "Windows 录音服务启动失败");
+                _waveIn?.Dispose();
+                _waveIn = null;
+                return false;
+            }
         }
     }
 
