@@ -30,14 +30,12 @@ public sealed class LinuxAudioCaptureService : IAudioCaptureService
 
     public event Action<byte[], int>? DataAvailable;
 
-    public void Start()
+    public bool Start()
     {
         lock (_gate)
         {
-            if (_disposed || _running || _captureThread is { IsAlive: true })
-            {
-                return;
-            }
+            if (_disposed) return false;
+            if (_running || _captureThread is { IsAlive: true }) return true;
 
             var openResult = snd_pcm_open(
                 out var pcm,
@@ -49,7 +47,7 @@ public sealed class LinuxAudioCaptureService : IAudioCaptureService
             {
                 Log.Error("Linux 录音服务打开 ALSA 设备失败。设备: {Device}，错误码: {ErrorCode}",
                     CaptureDevice, openResult);
-                return;
+                return false;
             }
 
             var setParamsResult = snd_pcm_set_params(
@@ -65,7 +63,7 @@ public sealed class LinuxAudioCaptureService : IAudioCaptureService
             {
                 Log.Error("Linux 录音服务设置 ALSA 参数失败。错误码: {ErrorCode}", setParamsResult);
                 snd_pcm_close(pcm);
-                return;
+                return false;
             }
 
             _pcm = pcm;
@@ -79,6 +77,7 @@ public sealed class LinuxAudioCaptureService : IAudioCaptureService
 
             Log.Information("Linux 录音服务已启动。设备: {Device}，采样率: {SampleRate}Hz，格式: 16bit mono PCM",
                 CaptureDevice, AudioSampleRate);
+            return true;
         }
     }
 
