@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Buffers;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,19 +21,12 @@ public partial class App : Application
     private VoiceOverlayWindow _overlayWindow = null!;
     private TrayMenuWindow _trayMenuWindow = null!;
     private XunfeiApi _xunfeiApi = null!;
+    private RecordingController _recordingController = null!;
 
     private ITrayService _trayService = null!;
     private IAudioCaptureService _audioCaptureService = null!;
     private ITextEntryService _textEntryService = null!;
     private IGlobalHotkeyService _globalHotkeyService = null!;
-
-    private readonly Lock _audioSendGate = new();
-    private Task _audioSendTail = Task.CompletedTask;
-
-    // 状态
-    private string _currentRecognizedText = string.Empty;
-    private readonly Lock _textLock = new();
-    private int _recordingState = (int)RecordingState.Idle;
     private int _isExiting;
 
     public override void Initialize()
@@ -63,8 +55,8 @@ public partial class App : Application
     {
         var appName = Assembly.GetExecutingAssembly().GetName().Name ?? AppPaths.AppName;
 
-        InitXunfeiApi();
         InitPlatformServices(appName);
+        InitXunfeiApi();
         InitLifecycleAndHotkey();
 
         base.OnFrameworkInitializationCompleted();
@@ -83,16 +75,45 @@ public partial class App : Application
         }
 
         _xunfeiApi = new XunfeiApi(config.AppId, config.ApiSecret, config.ApiKey);
+        _recordingController = new RecordingController(_xunfeiApi, _audioCaptureService);
 
-        _xunfeiApi.OnTextChanged += text =>
+        _recordingController.OverlayShowRequested += () => Dispatcher.UIThread.Post(() =>
         {
-            lock (_textLock)
+            var overlayWindow = GetOrCreateOverlayWindow();
+            overlayWindow.UpdateText(string.Empty);
+            overlayWindow.ShowWithAnimation();
+        });
+        _recordingController.OverlayHideRequested += () => Dispatcher.UIThread.Post(() =>
+            _ = GetOrCreateOverlayWindow().HideWithAnimation());
+        _recordingController.TextUpdated += text => Dispatcher.UIThread.Post(() =>
+            GetOrCreateOverlayWindow().UpdateText(text));
+        _recordingController.SessionCompleted += finalText => Dispatcher.UIThread.Post(async () =>
+        {
+            var overlayWindow = GetOrCreateOverlayWindow();
+            if (string.IsNullOrWhiteSpace(finalText))
             {
-                _currentRecognizedText = text;
+                await overlayWindow.HideWithAnimation();
+                return;
             }
 
-            Dispatcher.UIThread.Post(() => GetOrCreateOverlayWindow().UpdateText(text));
-        };
+            var clipboard = TopLevel.GetTopLevel(overlayWindow)?.Clipboard;
+            if (clipboard is not null)
+            {
+                await clipboard.SetTextAsync(finalText);
+            }
+
+            if (_textEntryService.IsSupported)
+            {
+                _textEntryService.SimulateTextEntry(finalText);
+                Log.Information("识别完成，已写入剪贴板并模拟输入。内容长度: {Length}", finalText.Length);
+            }
+            else
+            {
+                Log.Information("识别完成，已写入剪贴板。内容长度: {Length}", finalText.Length);
+            }
+
+            await overlayWindow.HideWithAnimation();
+        });
     }
 
     private VoiceOverlayWindow GetOrCreateOverlayWindow()
@@ -115,7 +136,6 @@ public partial class App : Application
         _textEntryService = PlatformServices.CreateTextEntryService();
         _globalHotkeyService = PlatformServices.CreateGlobalHotkeyService();
 
-        _audioCaptureService.DataAvailable += OnAudioDataAvailable;
         _trayService.Initialize(
             appName,
             ShowTrayMenu,
@@ -150,201 +170,9 @@ public partial class App : Application
         {
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
-            _globalHotkeyService.HotkeyPressed += OnHotkeyPressed;
-            _globalHotkeyService.HotkeyReleased += OnHotkeyReleased;
+            _globalHotkeyService.HotkeyPressed += (_, _) => _recordingController.HandleHotkeyPressed();
+            _globalHotkeyService.HotkeyReleased += (_, _) => _recordingController.HandleHotkeyReleased();
             _globalHotkeyService.Start();
-        }
-    }
-
-    private void OnHotkeyPressed(object? sender, EventArgs e)
-    {
-        // 只允许从 Idle → Connecting，防止重复触发
-        if (Interlocked.CompareExchange(
-                ref _recordingState,
-                (int)RecordingState.Connecting,
-                (int)RecordingState.Idle) != (int)RecordingState.Idle)
-        {
-            return;
-        }
-
-        // 只在真正开始录音时清空
-        lock (_textLock)
-        {
-            _currentRecognizedText = string.Empty;
-        }
-
-        _ = Task.Run(async () =>
-        {
-            Dispatcher.UIThread.Post(() =>
-            {
-                var overlayWindow = GetOrCreateOverlayWindow();
-                overlayWindow.UpdateText(string.Empty);
-                overlayWindow.ShowWithAnimation();
-            });
-
-            try
-            {
-                await _xunfeiApi.ConnectAsync();
-
-                // 连接期间若用户已松键（Stopping），立即终止，防止录音服务空转
-                if (_recordingState == (int)RecordingState.Stopping)
-                {
-                    await _xunfeiApi.StopAndSendLastFrameAsync();
-                    Dispatcher.UIThread.Post(() => _ = GetOrCreateOverlayWindow().HideWithAnimation());
-                    Interlocked.Exchange(ref _recordingState, (int)RecordingState.Idle);
-                    return;
-                }
-
-                if (!_audioCaptureService.Start())
-                {
-                    Log.Error("录音服务启动失败，无法开始录音");
-                    Interlocked.Exchange(ref _recordingState, (int)RecordingState.Idle);
-                    Dispatcher.UIThread.Post(() => _ = GetOrCreateOverlayWindow().HideWithAnimation());
-                    return;
-                }
-
-                Interlocked.Exchange(ref _recordingState, (int)RecordingState.Recording);
-                Log.Information("开始录音...");
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "连接讯飞 API 或初始化麦克风失败！");
-                // 异常时回退状态并收起界面
-                Interlocked.Exchange(ref _recordingState, (int)RecordingState.Idle);
-                Dispatcher.UIThread.Post(() => _ = GetOrCreateOverlayWindow().HideWithAnimation());
-            }
-        });
-    }
-
-    private void OnHotkeyReleased(object? sender, EventArgs e)
-    {
-        var prev = Interlocked.CompareExchange(
-            ref _recordingState,
-            (int)RecordingState.Stopping,
-            (int)RecordingState.Recording);
-
-        if (prev == (int)RecordingState.Idle) return;
-
-        if (prev == (int)RecordingState.Connecting)
-        {
-            Interlocked.Exchange(ref _recordingState, (int)RecordingState.Stopping);
-            return;
-        }
-
-        if (prev != (int)RecordingState.Recording) return;
-
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                _audioCaptureService.Stop();
-                await DrainPendingAudioSendsAsync();
-                await _xunfeiApi.StopAndSendLastFrameAsync();
-
-                string finalText;
-                lock (_textLock)
-                {
-                    finalText = _currentRecognizedText;
-                    _currentRecognizedText = string.Empty;
-                }
-
-                Log.Information("停止录音");
-
-                Dispatcher.UIThread.Post(async () =>
-                {
-                    var overlayWindow = GetOrCreateOverlayWindow();
-                    if (string.IsNullOrWhiteSpace(finalText))
-                    {
-                        await overlayWindow.HideWithAnimation();
-                        return;
-                    }
-
-                    var clipboard = TopLevel.GetTopLevel(overlayWindow)?.Clipboard;
-                    if (clipboard is not null)
-                    {
-                        await clipboard.SetTextAsync(finalText);
-                    }
-
-                    if (_textEntryService.IsSupported)
-                    {
-                        _textEntryService.SimulateTextEntry(finalText);
-                        Log.Information("识别完成，已写入剪贴板并模拟输入。内容长度: {Length}", finalText.Length);
-                    }
-                    else
-                    {
-                        Log.Information("识别完成，已写入剪贴板。内容长度: {Length}", finalText.Length);
-                    }
-
-                    await overlayWindow.HideWithAnimation();
-                });
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "停止录音或发送最终帧失败");
-                Dispatcher.UIThread.Post(() => _ = GetOrCreateOverlayWindow().HideWithAnimation());
-            }
-            finally
-            {
-                // 无论成功或异常，都必须归位到 Idle
-                Interlocked.Exchange(ref _recordingState, (int)RecordingState.Idle);
-            }
-        });
-    }
-
-    private void OnAudioDataAvailable(byte[] buffer, int bytesRecorded)
-    {
-        var audioChunk = ArrayPool<byte>.Shared.Rent(bytesRecorded);
-        Buffer.BlockCopy(buffer, 0, audioChunk, 0, bytesRecorded);
-        _ = SendAudioSequentiallyAsync(audioChunk, bytesRecorded);
-    }
-
-    private Task SendAudioSequentiallyAsync(byte[] audioData, int length)
-    {
-        lock (_audioSendGate)
-        {
-            var previous = _audioSendTail;
-            var current = SendAfterPreviousAsync(previous, audioData, length);
-            _audioSendTail = current;
-            return current;
-        }
-    }
-
-    private async Task SendAfterPreviousAsync(Task previous, byte[] audioData, int length)
-    {
-        try
-        {
-            await previous.ConfigureAwait(false);
-        }
-        catch
-        {
-            // 单次发送失败不应阻断后续音频；连接状态由 XunfeiApi 内部判断。
-        }
-
-        try
-        {
-            await _xunfeiApi.SendAudioDataAsync(audioData, length);
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(audioData);
-        }
-    }
-
-    private async Task DrainPendingAudioSendsAsync()
-    {
-        Task tail;
-        lock (_audioSendGate)
-        {
-            tail = _audioSendTail;
-        }
-
-        try
-        {
-            await tail.ConfigureAwait(false);
-        }
-        catch
-        {
-            // 停录阶段仅确保已入队音频尽量发完，单次失败不阻塞最终帧。
         }
     }
 
@@ -355,25 +183,13 @@ public partial class App : Application
             return;
         }
 
-        if (Volatile.Read(ref _recordingState) != (int)RecordingState.Idle)
+        // 正在录音时先优雅停止：停采集、排空已入队音频、发送最终帧，避免退出时截断发送。
+        if (_recordingController.IsRecording)
         {
             _ = Task.Run(async () =>
             {
-                try
-                {
-                    _audioCaptureService.Stop();
-                    await DrainPendingAudioSendsAsync();
-                    await _xunfeiApi.StopAndSendLastFrameAsync();
-                }
-                catch (Exception ex)
-                {
-                    Log.Warning(ex, "退出前停止录音失败，继续退出");
-                }
-                finally
-                {
-                    Interlocked.Exchange(ref _recordingState, (int)RecordingState.Idle);
-                    Dispatcher.UIThread.Post(Shutdown);
-                }
+                await _recordingController.StopAndFinalizeAsync();
+                Dispatcher.UIThread.Post(Shutdown);
             });
             return;
         }
@@ -392,11 +208,4 @@ public partial class App : Application
         }
     }
 
-    private enum RecordingState
-    {
-        Idle = 0,
-        Connecting = 1,
-        Recording = 2,
-        Stopping = 3
-    }
 }
