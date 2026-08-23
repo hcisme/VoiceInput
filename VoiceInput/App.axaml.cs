@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
@@ -29,12 +29,12 @@ public partial class App : Application
     private ITextEntryService _textEntryService = null!;
     private IGlobalHotkeyService _globalHotkeyService = null!;
 
-    private readonly object _audioSendGate = new();
+    private readonly Lock _audioSendGate = new();
     private Task _audioSendTail = Task.CompletedTask;
 
     // 状态
     private string _currentRecognizedText = string.Empty;
-    private readonly object _textLock = new();
+    private readonly Lock _textLock = new();
     private int _recordingState = (int)RecordingState.Idle;
 
     public override void Initialize()

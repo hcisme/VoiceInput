@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using SharpHook;
 using SharpHook.Data;
 
