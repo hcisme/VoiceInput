@@ -35,6 +35,7 @@ public partial class App : Application
     private string _currentRecognizedText = string.Empty;
     private readonly Lock _textLock = new();
     private int _recordingState = (int)RecordingState.Idle;
+    private int _isExiting;
 
     public override void Initialize()
     {
@@ -349,8 +350,41 @@ public partial class App : Application
 
     public void ExitApplication(object? sender, EventArgs e)
     {
-        _globalHotkeyService?.Dispose();
-        _trayService?.Dispose();
+        if (Interlocked.CompareExchange(ref _isExiting, 1, 0) != 0)
+        {
+            return;
+        }
+
+        if (Volatile.Read(ref _recordingState) != (int)RecordingState.Idle)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    _audioCaptureService.Stop();
+                    await DrainPendingAudioSendsAsync();
+                    await _xunfeiApi.StopAndSendLastFrameAsync();
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning(ex, "退出前停止录音失败，继续退出");
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref _recordingState, (int)RecordingState.Idle);
+                    Dispatcher.UIThread.Post(Shutdown);
+                }
+            });
+            return;
+        }
+
+        Shutdown();
+    }
+
+    private void Shutdown()
+    {
+        _globalHotkeyService.Dispose();
+        _trayService.Dispose();
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
