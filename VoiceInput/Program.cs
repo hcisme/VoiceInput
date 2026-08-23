@@ -24,7 +24,8 @@ sealed class Program
         if (!createdNew)
         {
             Log.Warning("程序已经在运行中");
-            return; 
+            LoggerManager.Close();
+            return;
         }
 
         try

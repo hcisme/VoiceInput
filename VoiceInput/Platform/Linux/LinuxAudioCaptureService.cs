@@ -165,7 +165,8 @@ public sealed class LinuxAudioCaptureService : IAudioCaptureService
 
                 if (frames is -4 or -11)
                 {
-                    // -EINTR 或 -EAGAIN，短暂等待后继续。
+                    // -4（-EINTR）：读取被信号中断；-11（-EAGAIN）：设备暂时无数据返回。
+                    // 都是可恢复的临时状态，短暂等待后继续。
                     Thread.Sleep(1);
                     continue;
                 }
