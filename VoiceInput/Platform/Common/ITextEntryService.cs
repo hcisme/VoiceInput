@@ -1,4 +1,4 @@
-namespace VoiceInput.Platform;
+﻿namespace VoiceInput.Platform;
 
 public interface ITextEntryService
 {
