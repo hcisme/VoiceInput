@@ -2,8 +2,6 @@
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Shapes;
-using Avalonia.Media;
 using Avalonia.Threading;
 
 namespace VoiceInput.Views;
@@ -12,7 +10,6 @@ public partial class VoiceOverlayWindow : Window
 {
     private readonly Border _mainBorder;
     private readonly TextBlock _recognizedTextBlock;
-    private readonly Path _micIcon;
 
     private int _animationToken;
 
@@ -24,8 +21,6 @@ public partial class VoiceOverlayWindow : Window
                       ?? throw new InvalidOperationException("找不到控件: MainBorder");
         _recognizedTextBlock = this.FindControl<TextBlock>("RecognizedTextBlock")
                                ?? throw new InvalidOperationException("找不到控件: RecognizedTextBlock");
-        _micIcon = this.FindControl<Path>("MicIcon")
-                   ?? throw new InvalidOperationException("找不到控件: MicIcon");
 
         SizeChanged += (s, e) => UpdatePosition();
     }
@@ -83,16 +78,6 @@ public partial class VoiceOverlayWindow : Window
             _recognizedTextBlock.Text = text;
             _mainBorder.ClearValue(WidthProperty);
             _mainBorder.Padding = new Thickness(15, 0, 20, 0);
-        }
-    }
-
-    public void UpdateVolume(float volume)
-    {
-        if (_micIcon.RenderTransform is ScaleTransform scale)
-        {
-            var targetScale = Math.Clamp(1.0 + (volume * 0.4), 1.0, 1.4);
-            scale.ScaleX = targetScale;
-            scale.ScaleY = targetScale;
         }
     }
 
