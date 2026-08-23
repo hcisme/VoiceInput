@@ -198,8 +198,6 @@ public class XunfeiApi(string? appId, string? apiSecret, string? apiKey) : IDisp
             webSocket.Dispose();
         }
 
-        _cts?.Dispose();
-        _cts = null;
     }
 
     private async Task ReceiveLoopAsync()

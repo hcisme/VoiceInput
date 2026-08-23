@@ -263,13 +263,13 @@ public partial class App : Application
                     {
                         _textEntryService.SimulateTextEntry(finalText);
                         Log.Information("识别完成，已写入剪贴板并模拟输入。内容长度: {Length}", finalText.Length);
-                        await overlayWindow.HideWithAnimation();
                     }
                     else
                     {
                         Log.Information("识别完成，已写入剪贴板。内容长度: {Length}", finalText.Length);
-                        await overlayWindow.HideWithAnimation();
                     }
+
+                    await overlayWindow.HideWithAnimation();
                 });
             }
             catch (Exception ex)
