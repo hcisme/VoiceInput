@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Buffers;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
@@ -287,7 +288,7 @@ public partial class App : Application
 
     private void OnAudioDataAvailable(byte[] buffer, int bytesRecorded)
     {
-        var audioChunk = new byte[bytesRecorded];
+        var audioChunk = ArrayPool<byte>.Shared.Rent(bytesRecorded);
         Buffer.BlockCopy(buffer, 0, audioChunk, 0, bytesRecorded);
         _ = SendAudioSequentiallyAsync(audioChunk, bytesRecorded);
 
@@ -324,7 +325,14 @@ public partial class App : Application
             // 单次发送失败不应阻断后续音频；连接状态由 XunfeiApi 内部判断。
         }
 
-        await _xunfeiApi.SendAudioDataAsync(audioData, length);
+        try
+        {
+            await _xunfeiApi.SendAudioDataAsync(audioData, length);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(audioData);
+        }
     }
 
     private async Task DrainPendingAudioSendsAsync()
