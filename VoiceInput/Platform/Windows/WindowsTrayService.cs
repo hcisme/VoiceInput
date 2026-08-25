@@ -5,16 +5,16 @@ using WinForms = System.Windows.Forms;
 
 namespace VoiceInput.Platform.Windows;
 
-public sealed class WindowsTrayService : ITrayService
+public sealed partial class WindowsTrayService : ITrayService
 {
     private WinForms.NotifyIcon? _notifyIcon;
     private readonly object _disposeLock = new();
     private bool _disposed;
     private Action<int, int>? _showMenuAt;
 
-    [DllImport("user32.dll")]
+    [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetCursorPos(out Point pt);
+    private static partial bool GetCursorPos(out Point pt);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct Point
