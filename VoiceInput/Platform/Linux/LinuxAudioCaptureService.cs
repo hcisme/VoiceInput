@@ -9,7 +9,7 @@ namespace VoiceInput.Platform.Linux;
 /// 使用 ALSA 的 default/PipeWire 设备采集音频。
 /// 输出格式固定为 16000 Hz / 16 bit / mono PCM，与讯飞 API 要求一致。
 /// </summary>
-public sealed class LinuxAudioCaptureService : IAudioCaptureService
+public sealed partial class LinuxAudioCaptureService : IAudioCaptureService
 {
     private const string CaptureDevice = "default";
 
@@ -185,15 +185,15 @@ public sealed class LinuxAudioCaptureService : IAudioCaptureService
         }
     }
 
-    [DllImport("libasound.so.2", CallingConvention = CallingConvention.Cdecl)]
-    private static extern int snd_pcm_open(
+    [LibraryImport("libasound.so.2", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int snd_pcm_open(
         out IntPtr pcm,
         string name,
         int stream,
         int mode);
 
-    [DllImport("libasound.so.2", CallingConvention = CallingConvention.Cdecl)]
-    private static extern int snd_pcm_set_params(
+    [LibraryImport("libasound.so.2")]
+    private static partial int snd_pcm_set_params(
         IntPtr pcm,
         int format,
         int access,
@@ -202,18 +202,18 @@ public sealed class LinuxAudioCaptureService : IAudioCaptureService
         int softResample,
         uint latency);
 
-    [DllImport("libasound.so.2", CallingConvention = CallingConvention.Cdecl)]
-    private static extern long snd_pcm_readi(
+    [LibraryImport("libasound.so.2")]
+    private static partial long snd_pcm_readi(
         IntPtr pcm,
         byte[] buffer,
         nuint frames);
 
-    [DllImport("libasound.so.2", CallingConvention = CallingConvention.Cdecl)]
-    private static extern int snd_pcm_prepare(IntPtr pcm);
+    [LibraryImport("libasound.so.2")]
+    private static partial int snd_pcm_prepare(IntPtr pcm);
 
-    [DllImport("libasound.so.2", CallingConvention = CallingConvention.Cdecl)]
-    private static extern int snd_pcm_drop(IntPtr pcm);
+    [LibraryImport("libasound.so.2")]
+    private static partial int snd_pcm_drop(IntPtr pcm);
 
-    [DllImport("libasound.so.2", CallingConvention = CallingConvention.Cdecl)]
-    private static extern int snd_pcm_close(IntPtr pcm);
+    [LibraryImport("libasound.so.2")]
+    private static partial int snd_pcm_close(IntPtr pcm);
 }
