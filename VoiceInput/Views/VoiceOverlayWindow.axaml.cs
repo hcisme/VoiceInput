@@ -33,6 +33,11 @@ public partial class VoiceOverlayWindow : Window
 
     public void ShowWithAnimation()
     {
+        // 与 HideWithAnimation 对称：每次显示也递增 token，这样如果上一次
+        // 隐藏动画的 100ms 延迟还没结束、新的显示已经发生，延迟回调会看到
+        // token 已变化，从而不会把刚显示出来的窗口误 Hide 掉。
+        _animationToken += 1;
+
         _mainBorder.Opacity = 0;
         _mainBorder.Margin = new Thickness(0, 20, 0, 0);
 
@@ -40,7 +45,11 @@ public partial class VoiceOverlayWindow : Window
         ShowActivated = false;
         Topmost = false;
         Topmost = true;
+
+        UpdatePosition();
+
         Show();
+
         UpdatePosition();
         Dispatcher.UIThread.Post(UpdatePosition, DispatcherPriority.Render);
 
@@ -89,14 +98,16 @@ public partial class VoiceOverlayWindow : Window
             // WorkingArea 已经自动排除了任务栏的高度
             var workArea = screen.WorkingArea;
 
-            // 获取窗口当前的实际宽高
-            var windowWidth = (int)Bounds.Width;
-            var windowHeight = (int)Bounds.Height;
-
-            // 首次显示时可能还没有完成布局，使用接近实际内容的默认尺寸，
-            // 避免 Avalonia/Wayland 把窗口临时放到屏幕中间。
-            if (windowWidth <= 0) windowWidth = 50;
-            if (windowHeight <= 0) windowHeight = 70;
+            // 获取窗口当前的实际宽高。Bounds 是 DIP（设备无关像素），
+            // 而 workArea / PixelPoint 是物理像素，需要按当前屏幕缩放系数换算，
+            // 否则在 125%/150%/200% 等缩放下窗口位置会偏移。
+            // 首次显示时窗口还没有完成布局，Bounds 宽高为 0。此时窗口处于
+            // “空文字”状态：MainBorder 50×50 + 外层 Border 上下左右各 20 内边距，
+            // 实际内容尺寸为 90×90（DIP），用它提前定位。
+            var widthDips = Bounds.Width > 0 ? Bounds.Width : 90;
+            var heightDips = Bounds.Height > 0 ? Bounds.Height : 90;
+            var windowWidth = (int)Math.Round(widthDips * screen.Scaling);
+            var windowHeight = (int)Math.Round(heightDips * screen.Scaling);
 
             // X 轴：屏幕宽度的一半 减去 窗口宽度的一半
             var x = workArea.X + (workArea.Width - windowWidth) / 2;

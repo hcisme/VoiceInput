@@ -197,23 +197,29 @@ public class XunfeiApi(string? appId, string? apiSecret, string? apiKey) : IDisp
 
             webSocket.Dispose();
         }
-
     }
 
     private async Task ReceiveLoopAsync()
     {
+        var webSocket = _webSocket;
+        var cts = _cts;
+        if (webSocket is null || cts is null)
+        {
+            return;
+        }
+
         var buffer = new byte[4096];
         try
         {
-            while (_webSocket?.State == WebSocketState.Open && !_cts!.IsCancellationRequested)
+            while (webSocket.State == WebSocketState.Open && !cts.IsCancellationRequested)
             {
                 using var ms = new MemoryStream();
                 WebSocketReceiveResult result;
                 do
                 {
-                    result = await _webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), _cts.Token);
+                    result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), cts.Token);
                     ms.Write(buffer, 0, result.Count);
-                } while (!result.EndOfMessage && _webSocket.State == WebSocketState.Open);
+                } while (!result.EndOfMessage && webSocket.State == WebSocketState.Open);
 
                 if (result.MessageType == WebSocketMessageType.Close) break;
 
@@ -224,6 +230,10 @@ public class XunfeiApi(string? appId, string? apiSecret, string? apiKey) : IDisp
         catch (OperationCanceledException)
         {
             // 主动取消属于正常流程，单独捕获，不打错误日志
+        }
+        catch (ObjectDisposedException)
+        {
+            // CloseAsync 里已释放 WebSocket，属于正常关闭流程
         }
         catch (Exception ex)
         {
@@ -254,7 +264,7 @@ public class XunfeiApi(string? appId, string? apiSecret, string? apiKey) : IDisp
             {
                 _finalResultTcs?.TrySetResult(true);
             }
-            
+
             var sn = resultEl.TryGetProperty("sn", out var snEl) ? snEl.GetInt32() : 1;
 
             // 取是追加还是替换 (pgs: apd=追加, rpl=替换)

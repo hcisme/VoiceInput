@@ -74,7 +74,7 @@ public sealed class RecordingController
                 // 连接期间若用户已松键（Stopping），立即终止，防止录音服务空转
                 if (_recordingState == (int)RecordingState.Stopping)
                 {
-                    await _xunfeiApi.StopAndSendLastFrameAsync();
+                    await _xunfeiApi.CloseAsync();
                     OverlayHideRequested?.Invoke();
                     Interlocked.Exchange(ref _recordingState, (int)RecordingState.Idle);
                     return;
