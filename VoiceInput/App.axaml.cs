@@ -89,22 +89,27 @@ public partial class App : Application
         _recordingController.SessionCompleted += finalText => Dispatcher.UIThread.Post(async () =>
         {
             var overlayWindow = GetOrCreateOverlayWindow();
-            if (string.IsNullOrWhiteSpace(finalText))
+            try
+            {
+                if (string.IsNullOrWhiteSpace(finalText)) return;
+
+                var clipboard = TopLevel.GetTopLevel(overlayWindow)?.Clipboard;
+                if (clipboard is not null)
+                {
+                    await clipboard.SetTextAsync(finalText);
+                }
+
+                _textEntryService.SimulateTextEntry(finalText);
+                Log.Information("识别完成，已写入剪贴板并模拟输入。内容长度: {Length}", finalText.Length);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "写入剪贴板或模拟输入失败");
+            }
+            finally
             {
                 await overlayWindow.HideWithAnimation();
-                return;
             }
-
-            var clipboard = TopLevel.GetTopLevel(overlayWindow)?.Clipboard;
-            if (clipboard is not null)
-            {
-                await clipboard.SetTextAsync(finalText);
-            }
-
-            _textEntryService.SimulateTextEntry(finalText);
-            Log.Information("识别完成，已写入剪贴板并模拟输入。内容长度: {Length}", finalText.Length);
-
-            await overlayWindow.HideWithAnimation();
         });
     }
 
@@ -193,6 +198,8 @@ public partial class App : Application
     {
         _globalHotkeyService.Dispose();
         _trayService.Dispose();
+        _audioCaptureService.Dispose();
+        _xunfeiApi.Dispose();
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {

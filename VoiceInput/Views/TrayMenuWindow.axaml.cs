@@ -25,6 +25,8 @@ public partial class TrayMenuWindow : Window
 
     public void ShowWithAnimation(int x, int y)
     {
+        _animationToken += 1;
+
         _mainBorder.Opacity = 0;
         _mainBorder.Margin = new Thickness(0, 10, 0, 0);
 

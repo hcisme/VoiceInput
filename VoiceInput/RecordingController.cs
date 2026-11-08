@@ -23,6 +23,9 @@ public sealed class RecordingController
     private string _currentRecognizedText = string.Empty;
     private readonly Lock _textLock = new();
     private int _recordingState = (int)RecordingState.Idle;
+    private int _sessionVersion;
+    private int _isFinalizing;
+    private readonly Lock _captureGate = new();
 
     /// <summary>开始录音：需要显示悬浮窗（空文字）。在后台线程触发。</summary>
     public event Action? OverlayShowRequested;
@@ -46,16 +49,35 @@ public sealed class RecordingController
 
     public bool IsRecording => Volatile.Read(ref _recordingState) != (int)RecordingState.Idle;
 
+    private bool IsFinalizing => Volatile.Read(ref _isFinalizing) != 0;
+
+    private bool IsCurrentSession(int version) =>
+        Volatile.Read(ref _sessionVersion) == version;
+
+    private bool TrySetState(RecordingState expected, RecordingState next) =>
+        Interlocked.CompareExchange(
+            ref _recordingState,
+            (int)next,
+            (int)expected) == (int)expected;
+
+    private async Task CloseApiQuietlyAsync()
+    {
+        try
+        {
+            await _xunfeiApi.CloseAsync();
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "关闭讯飞连接失败");
+        }
+    }
+
     public void HandleHotkeyPressed()
     {
-        // 只允许从 Idle → Connecting，防止重复触发
-        if (Interlocked.CompareExchange(
-                ref _recordingState,
-                (int)RecordingState.Connecting,
-                (int)RecordingState.Idle) != (int)RecordingState.Idle)
-        {
-            return;
-        }
+        if (IsFinalizing) return;
+        if (!TrySetState(RecordingState.Idle, RecordingState.Connecting)) return;
+
+        var version = Interlocked.Increment(ref _sessionVersion);
 
         // 只在真正开始录音时清空
         lock (_textLock)
@@ -63,91 +85,163 @@ public sealed class RecordingController
             _currentRecognizedText = string.Empty;
         }
 
+        OverlayShowRequested?.Invoke();
+
         _ = Task.Run(async () =>
         {
-            OverlayShowRequested?.Invoke();
+            // Task.Run 可能延迟启动；若此时已松键或退出，不要再建立连接。
+            if (!IsCurrentSession(version) ||
+                IsFinalizing ||
+                Volatile.Read(ref _recordingState) != (int)RecordingState.Connecting)
+            {
+                return;
+            }
 
             try
             {
                 await _xunfeiApi.ConnectAsync();
 
-                // 连接期间若用户已松键（Stopping），立即终止，防止录音服务空转
-                if (_recordingState == (int)RecordingState.Stopping)
+                // 连接期间如果已经松键或退出，由松键/退出路径负责清理，避免误关新会话。
+                if (!IsCurrentSession(version)) return;
+                if (IsFinalizing ||
+                    Volatile.Read(ref _recordingState) != (int)RecordingState.Connecting)
                 {
-                    await _xunfeiApi.CloseAsync();
-                    OverlayHideRequested?.Invoke();
-                    Interlocked.Exchange(ref _recordingState, (int)RecordingState.Idle);
+                    await CloseApiQuietlyAsync();
                     return;
                 }
 
-                if (!_audioCaptureService.Start())
+                // 先进入 Recording，再启动采集；松键能立即观察到该状态。
+                if (!TrySetState(RecordingState.Connecting, RecordingState.Recording))
+                {
+                    await CloseApiQuietlyAsync();
+                    return;
+                }
+
+                bool started;
+                lock (_captureGate)
+                {
+                    if (IsFinalizing ||
+                        Volatile.Read(ref _recordingState) != (int)RecordingState.Recording)
+                    {
+                        return;
+                    }
+
+                    started = _audioCaptureService.Start();
+                }
+
+                if (!started)
                 {
                     Log.Error("录音服务启动失败，无法开始录音");
-                    Interlocked.Exchange(ref _recordingState, (int)RecordingState.Idle);
-                    OverlayHideRequested?.Invoke();
+                    if (IsCurrentSession(version) &&
+                        TrySetState(RecordingState.Recording, RecordingState.Idle))
+                    {
+                        await CloseApiQuietlyAsync();
+                        OverlayHideRequested?.Invoke();
+                    }
                     return;
                 }
 
-                Interlocked.Exchange(ref _recordingState, (int)RecordingState.Recording);
                 Log.Information("开始录音...");
             }
             catch (Exception ex)
             {
                 Log.Error(ex, "连接讯飞 API 或初始化麦克风失败！");
-                // 异常时回退状态并收起界面
-                Interlocked.Exchange(ref _recordingState, (int)RecordingState.Idle);
-                OverlayHideRequested?.Invoke();
+
+                // 只清理当前会话；过期会话交给松键/退出路径处理。
+                if (!IsCurrentSession(version)) return;
+
+                await CloseApiQuietlyAsync();
+                if (TrySetState(RecordingState.Connecting, RecordingState.Idle) ||
+                    TrySetState(RecordingState.Recording, RecordingState.Idle))
+                {
+                    OverlayHideRequested?.Invoke();
+                }
             }
         });
     }
 
     public void HandleHotkeyReleased()
     {
-        var prev = Interlocked.CompareExchange(
-            ref _recordingState,
-            (int)RecordingState.Stopping,
-            (int)RecordingState.Recording);
+        if (IsFinalizing) return;
 
-        if (prev == (int)RecordingState.Idle) return;
-
-        if (prev == (int)RecordingState.Connecting)
+        // 循环处理 Connecting/Recording 与按下任务之间的竞争，避免漏掉松键。
+        while (true)
         {
-            Interlocked.Exchange(ref _recordingState, (int)RecordingState.Stopping);
-            return;
-        }
+            var state = Volatile.Read(ref _recordingState);
+            if (state is (int)RecordingState.Idle or (int)RecordingState.Stopping) return;
 
-        if (prev != (int)RecordingState.Recording) return;
-
-        _ = Task.Run(async () =>
-        {
-            try
+            if (state == (int)RecordingState.Connecting)
             {
-                _audioCaptureService.Stop();
-                await DrainPendingAudioSendsAsync();
-                await _xunfeiApi.StopAndSendLastFrameAsync();
-
-                string finalText;
-                lock (_textLock)
+                if (Interlocked.CompareExchange(
+                        ref _recordingState,
+                        (int)RecordingState.Stopping,
+                        (int)RecordingState.Connecting) != (int)RecordingState.Connecting)
                 {
-                    finalText = _currentRecognizedText;
-                    _currentRecognizedText = string.Empty;
+                    continue;
                 }
 
-                Log.Information("停止录音");
+                Interlocked.Increment(ref _sessionVersion);
+                _ = Task.Run(async () =>
+                {
+                    OverlayHideRequested?.Invoke();
+                    await CloseApiQuietlyAsync();
+                    Interlocked.CompareExchange(
+                        ref _recordingState,
+                        (int)RecordingState.Idle,
+                        (int)RecordingState.Stopping);
+                });
+                return;
+            }
 
-                SessionCompleted?.Invoke(finalText);
-            }
-            catch (Exception ex)
+            if (state == (int)RecordingState.Recording)
             {
-                Log.Error(ex, "停止录音或发送最终帧失败");
-                OverlayHideRequested?.Invoke();
+                if (Interlocked.CompareExchange(
+                        ref _recordingState,
+                        (int)RecordingState.Stopping,
+                        (int)RecordingState.Recording) != (int)RecordingState.Recording)
+                {
+                    continue;
+                }
+
+                Interlocked.Increment(ref _sessionVersion);
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        lock (_captureGate)
+                        {
+                            _audioCaptureService.Stop();
+                        }
+
+                        await DrainPendingAudioSendsAsync();
+                        await _xunfeiApi.StopAndSendLastFrameAsync();
+
+                        string finalText;
+                        lock (_textLock)
+                        {
+                            finalText = _currentRecognizedText;
+                            _currentRecognizedText = string.Empty;
+                        }
+
+                        Log.Information("停止录音");
+
+                        if (!IsFinalizing) SessionCompleted?.Invoke(finalText);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error(ex, "停止录音或发送最终帧失败");
+                        OverlayHideRequested?.Invoke();
+                    }
+                    finally
+                    {
+                        await CloseApiQuietlyAsync();
+                        // 无论成功或异常，都必须归位到 Idle
+                        Interlocked.Exchange(ref _recordingState, (int)RecordingState.Idle);
+                    }
+                });
+                return;
             }
-            finally
-            {
-                // 无论成功或异常，都必须归位到 Idle
-                Interlocked.Exchange(ref _recordingState, (int)RecordingState.Idle);
-            }
-        });
+        }
     }
 
     /// <summary>
@@ -156,9 +250,17 @@ public sealed class RecordingController
     /// </summary>
     public async Task StopAndFinalizeAsync()
     {
+        Interlocked.Exchange(ref _isFinalizing, 1);
+        Interlocked.Increment(ref _sessionVersion);
+        Interlocked.Exchange(ref _recordingState, (int)RecordingState.Stopping);
+
         try
         {
-            _audioCaptureService.Stop();
+            lock (_captureGate)
+            {
+                _audioCaptureService.Stop();
+            }
+
             await DrainPendingAudioSendsAsync();
             await _xunfeiApi.StopAndSendLastFrameAsync();
         }
@@ -168,6 +270,7 @@ public sealed class RecordingController
         }
         finally
         {
+            await CloseApiQuietlyAsync();
             Interlocked.Exchange(ref _recordingState, (int)RecordingState.Idle);
         }
     }

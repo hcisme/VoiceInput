@@ -42,18 +42,17 @@ public class XunfeiApi(string? appId, string? apiSecret, string? apiKey) : IDisp
     private readonly string _apiSecret = apiSecret ?? string.Empty;
     private readonly string _apiKey = apiKey ?? string.Empty;
 
-    private ClientWebSocket? _webSocket;
-    private CancellationTokenSource? _cts;
-    private bool _isFirstFrame = true;
-    private TaskCompletionSource<bool>? _finalResultTcs;
+    private readonly SemaphoreSlim _sendGate = new(1, 1);
+    private Session? _session;
 
-    private readonly Dictionary<int, string> _sentenceMap = new();
     public event Action<string>? OnTextChanged;
 
     private bool _disposed;
 
     public async Task ConnectAsync()
     {
+        if (_disposed) throw new ObjectDisposedException(nameof(XunfeiApi));
+
         if (string.IsNullOrWhiteSpace(_appId) ||
             string.IsNullOrWhiteSpace(_apiSecret) ||
             string.IsNullOrWhiteSpace(_apiKey))
@@ -65,148 +64,202 @@ public class XunfeiApi(string? appId, string? apiSecret, string? apiKey) : IDisp
 
         await CloseAsync();
 
-        _isFirstFrame = true;
-        _sentenceMap.Clear();
-        _finalResultTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var session = new Session();
+        Volatile.Write(ref _session, session);
 
-        _cts = new CancellationTokenSource();
-        _webSocket = new ClientWebSocket();
-
-        var authUrl = GetAuthUrl();
-        await _webSocket.ConnectAsync(new Uri(authUrl), _cts.Token);
-
-        _ = ReceiveLoopAsync();
+        try
+        {
+            var authUrl = GetAuthUrl();
+            await session.WebSocket.ConnectAsync(new Uri(authUrl), session.Cts.Token);
+            _ = ReceiveLoopAsync(session);
+        }
+        catch
+        {
+            await CloseSessionAsync(session);
+            throw;
+        }
     }
 
     public async Task SendAudioDataAsync(byte[] audioData, int length)
     {
-        if (_webSocket is not { State: WebSocketState.Open }) return;
+        var session = Volatile.Read(ref _session);
+        if (session is null) return;
 
-        var base64Audio = Convert.ToBase64String(audioData, 0, length);
-        var status = _isFirstFrame ? 0 : 1;
-
-        object requestObj;
-        if (_isFirstFrame)
+        try
         {
-            requestObj = new
-            {
-                common = new
-                {
-                    app_id = _appId
-                },
-                business = new
-                {
-                    language = Language,
-                    domain = Domain,
-                    accent = Accent,
-                    ptt = Ptt,
-                    vad_eos = VadEos,
-                    dwa = Dwa,
-                    nunum = Nunum
-                },
-                data = new
-                {
-                    status,
-                    format = AudioFormat,
-                    encoding = AudioEncoding,
-                    audio = base64Audio
-                }
-            };
-            _isFirstFrame = false;
+            await _sendGate.WaitAsync(session.Cts.Token);
         }
-        else
+        catch (OperationCanceledException)
         {
-            requestObj = new
-            {
-                data = new
-                {
-                    status,
-                    format = AudioFormat,
-                    encoding = AudioEncoding,
-                    audio = base64Audio
-                }
-            };
+            return;
+        }
+        catch (ObjectDisposedException)
+        {
+            return;
         }
 
-        var json = JsonSerializer.Serialize(requestObj);
-        var bytes = Encoding.UTF8.GetBytes(json);
-        await _webSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, _cts!.Token);
+        try
+        {
+            if (!ReferenceEquals(Volatile.Read(ref _session), session)) return;
+            if (session.WebSocket.State != WebSocketState.Open) return;
+
+            var isFirstFrame = session.IsFirstFrame;
+            var status = isFirstFrame ? 0 : 1;
+            var base64Audio = Convert.ToBase64String(audioData, 0, length);
+
+            object requestObj;
+            if (isFirstFrame)
+            {
+                requestObj = new
+                {
+                    common = new
+                    {
+                        app_id = _appId
+                    },
+                    business = new
+                    {
+                        language = Language,
+                        domain = Domain,
+                        accent = Accent,
+                        ptt = Ptt,
+                        vad_eos = VadEos,
+                        dwa = Dwa,
+                        nunum = Nunum
+                    },
+                    data = new
+                    {
+                        status,
+                        format = AudioFormat,
+                        encoding = AudioEncoding,
+                        audio = base64Audio
+                    }
+                };
+            }
+            else
+            {
+                requestObj = new
+                {
+                    data = new
+                    {
+                        status,
+                        format = AudioFormat,
+                        encoding = AudioEncoding,
+                        audio = base64Audio
+                    }
+                };
+            }
+
+            var json = JsonSerializer.Serialize(requestObj);
+            var bytes = Encoding.UTF8.GetBytes(json);
+            await session.WebSocket.SendAsync(
+                new ArraySegment<byte>(bytes),
+                WebSocketMessageType.Text,
+                true,
+                session.Cts.Token);
+
+            if (isFirstFrame) session.IsFirstFrame = false;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        catch (WebSocketException ex)
+        {
+            Log.Warning(ex, "发送音频失败");
+        }
+        finally
+        {
+            _sendGate.Release();
+        }
     }
 
     public async Task StopAndSendLastFrameAsync()
     {
-        if (_webSocket is not { State: WebSocketState.Open }) return;
+        var session = Volatile.Read(ref _session);
+        if (session is null) return;
 
-        var requestObj = new
+        try
         {
-            data = new
+            try
             {
-                status = 2,
-                format = AudioFormat,
-                encoding = AudioEncoding,
-                audio = ""
+                await _sendGate.WaitAsync(session.Cts.Token);
             }
-        };
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (ObjectDisposedException)
+            {
+                return;
+            }
 
-        var json = JsonSerializer.Serialize(requestObj);
-        var bytes = Encoding.UTF8.GetBytes(json);
-        await _webSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, _cts!.Token);
-        if (_finalResultTcs != null)
-        {
-            await Task.WhenAny(_finalResultTcs.Task, Task.Delay(2000));
+            try
+            {
+                if (!ReferenceEquals(Volatile.Read(ref _session), session)) return;
+                if (session.WebSocket.State != WebSocketState.Open) return;
+
+                var requestObj = new
+                {
+                    data = new
+                    {
+                        status = 2,
+                        format = AudioFormat,
+                        encoding = AudioEncoding,
+                        audio = ""
+                    }
+                };
+
+                var json = JsonSerializer.Serialize(requestObj);
+                var bytes = Encoding.UTF8.GetBytes(json);
+                await session.WebSocket.SendAsync(
+                    new ArraySegment<byte>(bytes),
+                    WebSocketMessageType.Text,
+                    true,
+                    session.Cts.Token);
+            }
+            finally
+            {
+                _sendGate.Release();
+            }
+
+            await Task.WhenAny(session.FinalResult.Task, Task.Delay(2000));
         }
-
-        await CloseAsync();
+        catch (OperationCanceledException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        catch (WebSocketException ex)
+        {
+            Log.Warning(ex, "发送最终帧失败");
+        }
+        finally
+        {
+            await CloseSessionAsync(session);
+        }
     }
 
     public async Task CloseAsync()
     {
-        var cts = Interlocked.Exchange(ref _cts, null);
-        if (cts != null)
-        {
-            await cts.CancelAsync();
-            cts.Dispose();
-        }
+        var session = Interlocked.Exchange(ref _session, null);
+        if (session is null) return;
 
-        var webSocket = Interlocked.Exchange(ref _webSocket, null);
-        if (webSocket != null)
-        {
-            if (webSocket.State == WebSocketState.Open)
-            {
-                try
-                {
-                    await webSocket.CloseAsync(
-                        WebSocketCloseStatus.NormalClosure,
-                        "Normal Closure",
-                        CancellationToken.None);
-                }
-                catch (OperationCanceledException)
-                {
-                    // CTS 取消后 CloseAsync 收到取消信号，属于正常流程
-                }
-                catch (ObjectDisposedException)
-                {
-                    // CTS 取消后 WebSocket 已被释放，属于正常流程
-                }
-                catch (Exception ex)
-                {
-                    // 真正意外的异常才记录
-                    Log.Warning(ex, "WebSocket 关闭时发生异常");
-                }
-            }
-
-            webSocket.Dispose();
-        }
+        await session.CloseAsync();
     }
 
-    private async Task ReceiveLoopAsync()
+    private async Task CloseSessionAsync(Session session)
     {
-        var webSocket = _webSocket;
-        var cts = _cts;
-        if (webSocket is null || cts is null)
-        {
-            return;
-        }
+        Interlocked.CompareExchange(ref _session, null, session);
+        await session.CloseAsync();
+    }
+
+    private async Task ReceiveLoopAsync(Session session)
+    {
+        var webSocket = session.WebSocket;
+        var cts = session.Cts;
 
         var buffer = new byte[4096];
         try
@@ -224,7 +277,7 @@ public class XunfeiApi(string? appId, string? apiSecret, string? apiKey) : IDisp
                 if (result.MessageType == WebSocketMessageType.Close) break;
 
                 var jsonResponse = Encoding.UTF8.GetString(ms.ToArray());
-                ParseResult(jsonResponse);
+                ParseResult(jsonResponse, session);
             }
         }
         catch (OperationCanceledException)
@@ -239,10 +292,17 @@ public class XunfeiApi(string? appId, string? apiSecret, string? apiKey) : IDisp
         {
             Log.Warning(ex, "WebSocket 接收循环异常退出");
         }
+        finally
+        {
+            await CloseSessionAsync(session);
+        }
     }
 
-    private void ParseResult(string json)
+    private void ParseResult(string json, Session session)
     {
+        if (!ReferenceEquals(Volatile.Read(ref _session), session)) return;
+
+        var isFinal = false;
         try
         {
             using var doc = JsonDocument.Parse(json);
@@ -255,15 +315,13 @@ public class XunfeiApi(string? appId, string? apiSecret, string? apiKey) : IDisp
                 return;
             }
 
-            if (!root.TryGetProperty("data", out var dataEl) ||
-                !dataEl.TryGetProperty("result", out var resultEl) ||
+            if (!root.TryGetProperty("data", out var dataEl)) return;
+
+            isFinal = dataEl.TryGetProperty("status", out var statusEl) && statusEl.GetInt32() == 2;
+
+            if (!dataEl.TryGetProperty("result", out var resultEl) ||
                 resultEl.ValueKind == JsonValueKind.Null
                ) return;
-
-            if (dataEl.TryGetProperty("status", out var statusEl) && statusEl.GetInt32() == 2)
-            {
-                _finalResultTcs?.TrySetResult(true);
-            }
 
             var sn = resultEl.TryGetProperty("sn", out var snEl) ? snEl.GetInt32() : 1;
 
@@ -278,7 +336,7 @@ public class XunfeiApi(string? appId, string? apiSecret, string? apiKey) : IDisp
                 // 把指定范围内的旧句子全删了
                 for (var i = startSn; i <= endSn; i++)
                 {
-                    _sentenceMap.Remove(i);
+                    session.SentenceMap.Remove(i);
                 }
             }
 
@@ -301,14 +359,14 @@ public class XunfeiApi(string? appId, string? apiSecret, string? apiKey) : IDisp
                 }
 
                 var textSegment = sb.ToString();
-                if (_sentenceMap.TryGetValue(sn, out var existing))
-                    _sentenceMap[sn] = existing + textSegment;
+                if (session.SentenceMap.TryGetValue(sn, out var existing))
+                    session.SentenceMap[sn] = existing + textSegment;
                 else
-                    _sentenceMap[sn] = textSegment;
+                    session.SentenceMap[sn] = textSegment;
             }
 
             var fullTextBuilder = new StringBuilder();
-            foreach (var kv in _sentenceMap.OrderBy(x => x.Key))
+            foreach (var kv in session.SentenceMap.OrderBy(x => x.Key))
             {
                 fullTextBuilder.Append(kv.Value);
             }
@@ -319,6 +377,10 @@ public class XunfeiApi(string? appId, string? apiSecret, string? apiKey) : IDisp
         catch (Exception ex)
         {
             Log.Error(ex, "JSON解析异常");
+        }
+        finally
+        {
+            if (isFinal) session.FinalResult.TrySetResult(true);
         }
     }
 
@@ -345,5 +407,64 @@ public class XunfeiApi(string? appId, string? apiSecret, string? apiKey) : IDisp
         _disposed = true;
         _ = CloseAsync();
         GC.SuppressFinalize(this);
+    }
+
+    private sealed class Session : IDisposable
+    {
+        private int _closed;
+
+        public ClientWebSocket WebSocket { get; } = new();
+        public CancellationTokenSource Cts { get; } = new();
+        public bool IsFirstFrame { get; set; } = true;
+        public TaskCompletionSource<bool> FinalResult { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Dictionary<int, string> SentenceMap { get; } = new();
+
+        public async Task CloseAsync()
+        {
+            if (Interlocked.Exchange(ref _closed, 1) != 0) return;
+
+            try
+            {
+                try
+                {
+                    await Cts.CancelAsync();
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+
+                if (WebSocket.State == WebSocketState.Open)
+                {
+                    try
+                    {
+                        await WebSocket.CloseAsync(
+                            WebSocketCloseStatus.NormalClosure,
+                            "Normal Closure",
+                            CancellationToken.None);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warning(ex, "WebSocket 关闭时发生异常");
+                    }
+                }
+            }
+            finally
+            {
+                Dispose();
+            }
+        }
+
+        public void Dispose()
+        {
+            Cts.Dispose();
+            WebSocket.Dispose();
+        }
     }
 }
