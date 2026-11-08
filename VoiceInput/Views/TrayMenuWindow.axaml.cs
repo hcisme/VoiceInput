@@ -58,7 +58,7 @@ public partial class TrayMenuWindow : Window
         try
         {
             await HideWithAnimation();
-            (Application.Current as App)?.ExitApplication(null, EventArgs.Empty);
+            (Application.Current as App)?.ExitApplication();
         }
         catch (Exception ex)
         {

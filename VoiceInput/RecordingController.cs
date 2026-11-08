@@ -47,7 +47,7 @@ public sealed class RecordingController
         _audioCaptureService.DataAvailable += OnAudioDataAvailable;
     }
 
-    public bool IsRecording => Volatile.Read(ref _recordingState) != (int)RecordingState.Idle;
+    public bool IsSessionActive => Volatile.Read(ref _recordingState) != (int)RecordingState.Idle;
 
     private bool IsFinalizing => Volatile.Read(ref _isFinalizing) != 0;
 

@@ -23,7 +23,7 @@ public sealed partial class TrayService
         public int Y;
     }
 
-    public void Initialize(string appName, Action<int, int> showMenuAt, Action exitApplication)
+    public void Initialize(string appName, Action<int, int> showMenuAt)
     {
         _showMenuAt = showMenuAt;
 

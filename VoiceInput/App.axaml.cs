@@ -63,6 +63,12 @@ public partial class App : Application
 
     private void InitXunfeiApi()
     {
+        var config = LoadApiConfig();
+        CreateRecordingServices(config);
+    }
+
+    private static AppConfig LoadApiConfig()
+    {
         var config = ConfigManager.LoadConfig();
 
         if (string.IsNullOrWhiteSpace(config.AppId) ||
@@ -73,9 +79,18 @@ public partial class App : Application
                 AppPaths.ConfigFilePath);
         }
 
+        return config;
+    }
+
+    private void CreateRecordingServices(AppConfig config)
+    {
         _xunfeiApi = new XunfeiApi(config.AppId, config.ApiSecret, config.ApiKey);
         _recordingController = new RecordingController(_xunfeiApi, _audioCaptureService);
+        BindRecordingEvents();
+    }
 
+    private void BindRecordingEvents()
+    {
         _recordingController.OverlayShowRequested += () => Dispatcher.UIThread.Post(() =>
         {
             var overlayWindow = GetOrCreateOverlayWindow();
@@ -135,8 +150,7 @@ public partial class App : Application
 
         _trayService.Initialize(
             appName,
-            ShowTrayMenu,
-            () => ExitApplication(null, EventArgs.Empty));
+            ShowTrayMenu);
 
         AppDomain.CurrentDomain.ProcessExit += (_, _) => _trayService.Dispose();
     }
@@ -173,7 +187,7 @@ public partial class App : Application
         }
     }
 
-    public void ExitApplication(object? sender, EventArgs e)
+    public void ExitApplication()
     {
         if (Interlocked.CompareExchange(ref _isExiting, 1, 0) != 0)
         {
@@ -181,7 +195,7 @@ public partial class App : Application
         }
 
         // 正在录音时先优雅停止：停采集、排空已入队音频、发送最终帧，避免退出时截断发送。
-        if (_recordingController.IsRecording)
+        if (_recordingController.IsSessionActive)
         {
             _ = Task.Run(async () =>
             {

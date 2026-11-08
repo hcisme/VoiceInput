@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -17,7 +18,6 @@ public class XunfeiApi(string? appId, string? apiSecret, string? apiKey) : IDisp
 {
     private const string WssHost = "iat-api.xfyun.cn";
     private const string WssPath = "/v2/iat";
-    private const string WssUrl = $"wss://{WssHost}{WssPath}";
 
     private const string AudioFormat = "audio/L16;rate=16000";
     private const string AudioEncoding = "raw";
@@ -105,54 +105,41 @@ public class XunfeiApi(string? appId, string? apiSecret, string? apiKey) : IDisp
 
             var isFirstFrame = session.IsFirstFrame;
             var status = isFirstFrame ? 0 : 1;
-            var base64Audio = Convert.ToBase64String(audioData, 0, length);
 
-            object requestObj;
-            if (isFirstFrame)
+            var buffer = new ArrayBufferWriter<byte>(length * 2 + 512);
+            using (var writer = new Utf8JsonWriter(buffer))
             {
-                requestObj = new
+                writer.WriteStartObject();
+
+                if (isFirstFrame)
                 {
-                    common = new
-                    {
-                        app_id = _appId
-                    },
-                    business = new
-                    {
-                        language = Language,
-                        domain = Domain,
-                        accent = Accent,
-                        ptt = Ptt,
-                        vad_eos = VadEos,
-                        dwa = Dwa,
-                        nunum = Nunum
-                    },
-                    data = new
-                    {
-                        status,
-                        format = AudioFormat,
-                        encoding = AudioEncoding,
-                        audio = base64Audio
-                    }
-                };
-            }
-            else
-            {
-                requestObj = new
-                {
-                    data = new
-                    {
-                        status,
-                        format = AudioFormat,
-                        encoding = AudioEncoding,
-                        audio = base64Audio
-                    }
-                };
+                    writer.WriteStartObject("common");
+                    writer.WriteString("app_id", _appId);
+                    writer.WriteEndObject();
+
+                    writer.WriteStartObject("business");
+                    writer.WriteString("language", Language);
+                    writer.WriteString("domain", Domain);
+                    writer.WriteString("accent", Accent);
+                    writer.WriteNumber("ptt", Ptt);
+                    writer.WriteNumber("vad_eos", VadEos);
+                    writer.WriteString("dwa", Dwa);
+                    writer.WriteNumber("nunum", Nunum);
+                    writer.WriteEndObject();
+                }
+
+                writer.WriteStartObject("data");
+                writer.WriteNumber("status", status);
+                writer.WriteString("format", AudioFormat);
+                writer.WriteString("encoding", AudioEncoding);
+                writer.WriteBase64String("audio", audioData.AsSpan(0, length));
+                writer.WriteEndObject();
+
+                writer.WriteEndObject();
             }
 
-            var json = JsonSerializer.Serialize(requestObj);
-            var bytes = Encoding.UTF8.GetBytes(json);
             await session.WebSocket.SendAsync(
-                new ArraySegment<byte>(bytes),
+                buffer.WrittenMemory,
                 WebSocketMessageType.Text,
                 true,
                 session.Cts.Token);

@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Serilog;
 
@@ -63,23 +62,23 @@ public sealed partial class TextEntryService
     {
         if (string.IsNullOrEmpty(text)) return;
 
-        var inputs = new List<Input>();
+        var inputs = new Input[text.Length * 2];
+        var index = 0;
 
         foreach (var c in text)
         {
-            var down = new Input { type = InputKeyboard };
-            down.U.ki.wScan = c;
-            down.U.ki.dwFlags = KeyEventUnicode;
+            inputs[index].type = InputKeyboard;
+            inputs[index].U.ki.wScan = c;
+            inputs[index].U.ki.dwFlags = KeyEventUnicode;
+            index++;
 
-            var up = new Input { type = InputKeyboard };
-            up.U.ki.wScan = c;
-            up.U.ki.dwFlags = KeyEventUnicode | KeyEventKeyUp;
-
-            inputs.Add(down);
-            inputs.Add(up);
+            inputs[index].type = InputKeyboard;
+            inputs[index].U.ki.wScan = c;
+            inputs[index].U.ki.dwFlags = KeyEventUnicode | KeyEventKeyUp;
+            index++;
         }
 
-        var result = SendInput((uint)inputs.Count, inputs.ToArray(), Input.Size);
+        var result = SendInput((uint)inputs.Length, inputs, Input.Size);
 
         if (result != 0) return;
 
