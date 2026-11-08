@@ -2,9 +2,9 @@
 using NAudio.Wave;
 using Serilog;
 
-namespace VoiceInput.Platform.Windows;
+namespace VoiceInput.Services;
 
-public sealed class WindowsAudioCaptureService : IAudioCaptureService
+public sealed class AudioCaptureService
 {
     private const int AudioSampleRate = 16000;
     private const int AudioBitsPerSample = 16;

@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Serilog;
 
-namespace VoiceInput.Platform.Windows;
+namespace VoiceInput.Services;
 
-public sealed partial class WindowsTextEntryService : ITextEntryService
+public sealed partial class TextEntryService
 {
     [LibraryImport("user32.dll", SetLastError = true)]
     private static partial uint SendInput(uint nInputs, Input[] pInputs, int cbSize);
@@ -58,8 +58,6 @@ public sealed partial class WindowsTextEntryService : ITextEntryService
     private const uint InputKeyboard = 1;
     private const uint KeyEventUnicode = 0x0004;
     private const uint KeyEventKeyUp = 0x0002;
-
-    public bool IsSupported => OperatingSystem.IsWindows();
 
     public void SimulateTextEntry(string text)
     {

@@ -10,9 +10,8 @@ coverage/
 build.iss
 VoiceInput_Setup_*.exe
 
-# Linux 打包产物
+# 打包产物
 dist/
-*.deb
 *.tar.gz
 *.tar.xz
 *.zip
@@ -42,6 +41,3 @@ Desktop.ini
 # Mac
 .DS_Store
 
-# Linux
-core
-core.*

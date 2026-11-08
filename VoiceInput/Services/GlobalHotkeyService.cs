@@ -2,9 +2,9 @@
 using SharpHook;
 using SharpHook.Data;
 
-namespace VoiceInput.Platform.Windows;
+namespace VoiceInput.Services;
 
-public sealed class WindowsGlobalHotkeyService : IGlobalHotkeyService
+public sealed class GlobalHotkeyService
 {
     private TaskPoolGlobalHook? _globalHook;
     private bool _isCtrlPressed;

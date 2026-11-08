@@ -3,9 +3,9 @@ using System.Drawing;
 using System.Runtime.InteropServices;
 using WinForms = System.Windows.Forms;
 
-namespace VoiceInput.Platform.Windows;
+namespace VoiceInput.Services;
 
-public sealed partial class WindowsTrayService : ITrayService
+public sealed partial class TrayService
 {
     private WinForms.NotifyIcon? _notifyIcon;
     private readonly object _disposeLock = new();

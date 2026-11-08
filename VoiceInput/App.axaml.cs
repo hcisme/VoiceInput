@@ -10,7 +10,7 @@ using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
 using Serilog;
 using VoiceInput.Api;
-using VoiceInput.Platform;
+using VoiceInput.Services;
 using VoiceInput.Utils;
 using VoiceInput.Views;
 
@@ -23,10 +23,10 @@ public partial class App : Application
     private XunfeiApi _xunfeiApi = null!;
     private RecordingController _recordingController = null!;
 
-    private ITrayService _trayService = null!;
-    private IAudioCaptureService _audioCaptureService = null!;
-    private ITextEntryService _textEntryService = null!;
-    private IGlobalHotkeyService _globalHotkeyService = null!;
+    private TrayService _trayService = null!;
+    private AudioCaptureService _audioCaptureService = null!;
+    private TextEntryService _textEntryService = null!;
+    private GlobalHotkeyService _globalHotkeyService = null!;
     private int _isExiting;
 
     public override void Initialize()
@@ -38,8 +38,7 @@ public partial class App : Application
     private void OnDispatcherUnhandledException(object? sender,
         DispatcherUnhandledExceptionEventArgs e)
     {
-        // Linux 托盘图标在应用退出时，Avalonia 的 DBusTrayIconImpl.WatchAsync()
-        // 会因为会话取消抛出 TaskCanceledException。这是退出路径中的预期取消，
+        // 应用退出时某些异步操作可能被取消，这是退出路径中的预期取消，
         // 不应被当成致命崩溃。
         if (e.Exception is OperationCanceledException)
         {
@@ -55,7 +54,7 @@ public partial class App : Application
     {
         var appName = Assembly.GetExecutingAssembly().GetName().Name ?? AppPaths.AppName;
 
-        InitPlatformServices(appName);
+        InitServices(appName);
         InitXunfeiApi();
         InitLifecycleAndHotkey();
 
@@ -102,15 +101,8 @@ public partial class App : Application
                 await clipboard.SetTextAsync(finalText);
             }
 
-            if (_textEntryService.IsSupported)
-            {
-                _textEntryService.SimulateTextEntry(finalText);
-                Log.Information("识别完成，已写入剪贴板并模拟输入。内容长度: {Length}", finalText.Length);
-            }
-            else
-            {
-                Log.Information("识别完成，已写入剪贴板。内容长度: {Length}", finalText.Length);
-            }
+            _textEntryService.SimulateTextEntry(finalText);
+            Log.Information("识别完成，已写入剪贴板并模拟输入。内容长度: {Length}", finalText.Length);
 
             await overlayWindow.HideWithAnimation();
         });
@@ -129,12 +121,12 @@ public partial class App : Application
         return _trayMenuWindow ??= new TrayMenuWindow();
     }
 
-    private void InitPlatformServices(string appName)
+    private void InitServices(string appName)
     {
-        _trayService = PlatformServices.CreateTrayService();
-        _audioCaptureService = PlatformServices.CreateAudioCaptureService();
-        _textEntryService = PlatformServices.CreateTextEntryService();
-        _globalHotkeyService = PlatformServices.CreateGlobalHotkeyService();
+        _trayService = new TrayService();
+        _audioCaptureService = new AudioCaptureService();
+        _textEntryService = new TextEntryService();
+        _globalHotkeyService = new GlobalHotkeyService();
 
         _trayService.Initialize(
             appName,

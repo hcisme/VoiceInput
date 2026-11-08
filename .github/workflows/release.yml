@@ -10,53 +10,6 @@ permissions:
   contents: write
 
 jobs:
-  linux:
-    name: Build Ubuntu .deb
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-
-      - name: Cache NuGet packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.nuget/packages
-          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/packages.lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-nuget-
-
-      - name: Install Linux native dependencies
-        run: ./scripts/install-linux-deps.sh
-
-      - name: Publish Linux x64
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          dotnet publish VoiceInput/VoiceInput.csproj \
-            -c Release \
-            -f net10.0 \
-            -r linux-x64 \
-            --self-contained true \
-            -p:DebugType=none \
-            -p:EnableWindowsTargeting=true \
-            -p:Version="$VERSION"
-
-      - name: Package .deb
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          ./build/linux/build-deb.sh "$VERSION"
-
-      - name: Upload .deb artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: VoiceInput-deb
-          path: dist/VoiceInput_*_amd64.deb
-
   windows:
     name: Build Windows installer
     runs-on: windows-latest
@@ -96,7 +49,6 @@ jobs:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
     needs:
-      - linux
       - windows
 
     steps:
@@ -114,5 +66,4 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release-artifacts/VoiceInput-deb/VoiceInput_*_amd64.deb
             release-artifacts/VoiceInput-exe/VoiceInput_Setup_v*.exe

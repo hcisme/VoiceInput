@@ -4,7 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Serilog;
 using VoiceInput.Api;
-using VoiceInput.Platform;
+using VoiceInput.Services;
 
 namespace VoiceInput;
 
@@ -15,7 +15,7 @@ namespace VoiceInput;
 public sealed class RecordingController
 {
     private readonly XunfeiApi _xunfeiApi;
-    private readonly IAudioCaptureService _audioCaptureService;
+    private readonly AudioCaptureService _audioCaptureService;
 
     private readonly Lock _audioSendGate = new();
     private Task _audioSendTail = Task.CompletedTask;
@@ -36,7 +36,7 @@ public sealed class RecordingController
     /// <summary>一次会话收尾完成，携带最终文字（可能为空）。在后台线程触发。</summary>
     public event Action<string>? SessionCompleted;
 
-    public RecordingController(XunfeiApi xunfeiApi, IAudioCaptureService audioCaptureService)
+    public RecordingController(XunfeiApi xunfeiApi, AudioCaptureService audioCaptureService)
     {
         _xunfeiApi = xunfeiApi;
         _audioCaptureService = audioCaptureService;
