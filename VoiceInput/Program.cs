@@ -18,7 +18,15 @@ sealed class Program
     public static void Main(string[] args)
     {
         Console.OutputEncoding = Encoding.UTF8;
-        LoggerManager.Initialize();
+        try
+        {
+            LoggerManager.Initialize();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"日志初始化失败: {ex.Message}");
+        }
+
         _mutex = new Mutex(true, AppPaths.AppMutexName, out var createdNew);
 
         if (!createdNew)

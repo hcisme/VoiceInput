@@ -57,32 +57,46 @@ public sealed partial class TextEntryService
     private const uint InputKeyboard = 1;
     private const uint KeyEventUnicode = 0x0004;
     private const uint KeyEventKeyUp = 0x0002;
+    private const int InputBatchSize = 256;
 
     public void SimulateTextEntry(string text)
     {
         if (string.IsNullOrEmpty(text)) return;
 
-        var inputs = new Input[text.Length * 2];
-        var index = 0;
+        var inputs = new Input[Math.Min(text.Length, InputBatchSize / 2) * 2];
+        var count = 0;
 
         foreach (var c in text)
         {
-            inputs[index].type = InputKeyboard;
-            inputs[index].U.ki.wScan = c;
-            inputs[index].U.ki.dwFlags = KeyEventUnicode;
-            index++;
+            if (count + 2 > inputs.Length)
+            {
+                if (!SendBatch(inputs, count)) return;
+                count = 0;
+            }
 
-            inputs[index].type = InputKeyboard;
-            inputs[index].U.ki.wScan = c;
-            inputs[index].U.ki.dwFlags = KeyEventUnicode | KeyEventKeyUp;
-            index++;
+            inputs[count++] = CreateKeyInput(c, keyUp: false);
+            inputs[count++] = CreateKeyInput(c, keyUp: true);
         }
 
-        var result = SendInput((uint)inputs.Length, inputs, Input.Size);
+        if (count > 0) SendBatch(inputs, count);
+    }
 
-        if (result != 0) return;
+    private static Input CreateKeyInput(char c, bool keyUp)
+    {
+        var input = new Input { type = InputKeyboard };
+        input.U.ki.wScan = c;
+        input.U.ki.dwFlags = keyUp ? KeyEventUnicode | KeyEventKeyUp : KeyEventUnicode;
+        return input;
+    }
+
+    private static bool SendBatch(Input[] inputs, int count)
+    {
+        var sent = SendInput((uint)count, inputs, Input.Size);
+        if (sent == (uint)count) return true;
 
         var errorCode = Marshal.GetLastPInvokeError();
-        Log.Error("底层键盘模拟发送失败！错误码: {ErrorCode}", errorCode);
+        Log.Error("底层键盘模拟发送失败！期望 {Expected} 个事件，实际 {Sent} 个，错误码: {ErrorCode}",
+            count, sent, errorCode);
+        return false;
     }
 }

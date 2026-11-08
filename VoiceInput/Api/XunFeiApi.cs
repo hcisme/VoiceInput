@@ -38,6 +38,9 @@ public class XunfeiApi(string? appId, string? apiSecret, string? apiKey) : IDisp
     // nunum：是否将数字转为阿拉伯数字，0=不转换，1=转换（默认1）
     private const int Nunum = 1;
 
+    private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan CloseTimeout = TimeSpan.FromSeconds(2);
+
     private readonly string _appId = appId ?? string.Empty;
     private readonly string _apiSecret = apiSecret ?? string.Empty;
     private readonly string _apiKey = apiKey ?? string.Empty;
@@ -70,7 +73,9 @@ public class XunfeiApi(string? appId, string? apiSecret, string? apiKey) : IDisp
         try
         {
             var authUrl = GetAuthUrl();
-            await session.WebSocket.ConnectAsync(new Uri(authUrl), session.Cts.Token);
+            using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(session.Cts.Token);
+            connectCts.CancelAfter(ConnectTimeout);
+            await session.WebSocket.ConnectAsync(new Uri(authUrl), connectCts.Token);
             _ = ReceiveLoopAsync(session);
         }
         catch
@@ -425,10 +430,11 @@ public class XunfeiApi(string? appId, string? apiSecret, string? apiKey) : IDisp
                 {
                     try
                     {
+                        using var closeCts = new CancellationTokenSource(CloseTimeout);
                         await WebSocket.CloseAsync(
                             WebSocketCloseStatus.NormalClosure,
                             "Normal Closure",
-                            CancellationToken.None);
+                            closeCts.Token);
                     }
                     catch (OperationCanceledException)
                     {

@@ -24,28 +24,25 @@ public static class ConfigManager
         var configDirPath = AppPaths.ConfigDirectory;
         var configFilePath = AppPaths.ConfigFilePath;
 
-        if (!Directory.Exists(configDirPath))
-        {
-            Directory.CreateDirectory(configDirPath);
-        }
-
-        if (!File.Exists(configFilePath))
-        {
-            var defaultConfig = new AppConfig();
-            var json = JsonSerializer.Serialize(defaultConfig, JsonOptions);
-
-            File.WriteAllText(configFilePath, json);
-            return defaultConfig;
-        }
-
         try
         {
-            var json = File.ReadAllText(configFilePath);
-            return JsonSerializer.Deserialize<AppConfig>(json, JsonOptions) ?? new AppConfig();
+            Directory.CreateDirectory(configDirPath);
+
+            if (!File.Exists(configFilePath))
+            {
+                var defaultConfig = new AppConfig();
+                var defaultJson = JsonSerializer.Serialize(defaultConfig, JsonOptions);
+
+                File.WriteAllText(configFilePath, defaultJson);
+                return defaultConfig;
+            }
+
+            var configJson = File.ReadAllText(configFilePath);
+            return JsonSerializer.Deserialize<AppConfig>(configJson, JsonOptions) ?? new AppConfig();
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "配置文件读取失败");
+            Log.Error(ex, "配置文件读取失败，将使用空配置：{ConfigPath}", configFilePath);
             return new AppConfig();
         }
     }

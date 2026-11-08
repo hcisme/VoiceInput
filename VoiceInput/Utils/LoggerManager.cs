@@ -25,27 +25,36 @@ public static class LoggerManager
     public static void Initialize()
     {
         var logDir = AppPaths.LogsDirectory;
-
-        if (!Directory.Exists(logDir))
-        {
-            Directory.CreateDirectory(logDir);
-        }
-
         var logFilePath = AppPaths.LogFilePath;
 
-        Log.Logger = new LoggerConfiguration()
-            .WriteTo.Console()
-            .MinimumLevel.Information()
-            .WriteTo.File(
-                path: logFilePath,
-                rollingInterval: RollingInterval.Day,
-                rollOnFileSizeLimit: true,
-                fileSizeLimitBytes: 10 * 1024 * 1024,
-                retainedFileCountLimit: 3,
-                shared: true
-            )
-            .WriteTo.Sink(EventSink)
-            .CreateLogger();
+        try
+        {
+            Directory.CreateDirectory(logDir);
+
+            Log.Logger = new LoggerConfiguration()
+                .WriteTo.Console()
+                .MinimumLevel.Information()
+                .WriteTo.File(
+                    path: logFilePath,
+                    rollingInterval: RollingInterval.Day,
+                    rollOnFileSizeLimit: true,
+                    fileSizeLimitBytes: 10 * 1024 * 1024,
+                    retainedFileCountLimit: 3,
+                    shared: true
+                )
+                .WriteTo.Sink(EventSink)
+                .CreateLogger();
+        }
+        catch (Exception ex)
+        {
+            Log.Logger = new LoggerConfiguration()
+                .WriteTo.Console()
+                .MinimumLevel.Information()
+                .CreateLogger();
+
+            Log.Error(ex, "日志目录创建或文件日志初始化失败，已退回控制台日志");
+            return;
+        }
 
         Log.Information("日志系统初始化成功");
     }

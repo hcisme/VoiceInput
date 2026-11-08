@@ -10,6 +10,7 @@ public partial class VoiceOverlayWindow : Window
 {
     private readonly Border _mainBorder;
     private readonly TextBlock _recognizedTextBlock;
+    private readonly ScrollViewer _textScrollViewer;
 
     private int _animationToken;
 
@@ -21,6 +22,8 @@ public partial class VoiceOverlayWindow : Window
                       ?? throw new InvalidOperationException("找不到控件: MainBorder");
         _recognizedTextBlock = this.FindControl<TextBlock>("RecognizedTextBlock")
                                ?? throw new InvalidOperationException("找不到控件: RecognizedTextBlock");
+        _textScrollViewer = this.FindControl<ScrollViewer>("TextScrollViewer")
+                            ?? throw new InvalidOperationException("找不到控件: TextScrollViewer");
 
         SizeChanged += (s, e) => UpdatePosition();
     }
@@ -78,6 +81,10 @@ public partial class VoiceOverlayWindow : Window
         {
             _recognizedTextBlock.IsVisible = false;
             _recognizedTextBlock.Text = "";
+            _textScrollViewer.IsVisible = false;
+            _textScrollViewer.Width = 0;
+            _textScrollViewer.Margin = default;
+            _textScrollViewer.Offset = default;
             _mainBorder.Width = 50;
             _mainBorder.Padding = new Thickness(0);
         }
@@ -85,9 +92,25 @@ public partial class VoiceOverlayWindow : Window
         {
             _recognizedTextBlock.IsVisible = true;
             _recognizedTextBlock.Text = text;
+            _textScrollViewer.IsVisible = true;
+            _textScrollViewer.ClearValue(WidthProperty);
+            _textScrollViewer.Margin = new Thickness(10, 0, 0, 0);
             _mainBorder.ClearValue(WidthProperty);
             _mainBorder.Padding = new Thickness(15, 0, 20, 0);
+
+            // 等布局完成后再滚动，确保 Extent/Viewport 已经更新。
+            Dispatcher.UIThread.Post(
+                ScrollToLatest,
+                DispatcherPriority.Loaded);
         }
+    }
+
+    private void ScrollToLatest()
+    {
+        var maxOffsetX = Math.Max(
+            0,
+            _textScrollViewer.Extent.Width - _textScrollViewer.Viewport.Width);
+        _textScrollViewer.Offset = new Vector(maxOffsetX, _textScrollViewer.Offset.Y);
     }
 
     private void UpdatePosition()

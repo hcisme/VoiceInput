@@ -26,6 +26,7 @@ public sealed class RecordingController
     private int _sessionVersion;
     private int _isFinalizing;
     private readonly Lock _captureGate = new();
+    private int _audioAccepting;
 
     /// <summary>开始录音：需要显示悬浮窗（空文字）。在后台线程触发。</summary>
     public event Action? OverlayShowRequested;
@@ -126,7 +127,9 @@ public sealed class RecordingController
                         return;
                     }
 
+                    Volatile.Write(ref _audioAccepting, 1);
                     started = _audioCaptureService.Start();
+                    if (!started) Volatile.Write(ref _audioAccepting, 0);
                 }
 
                 if (!started)
@@ -210,6 +213,7 @@ public sealed class RecordingController
                     {
                         lock (_captureGate)
                         {
+                            Volatile.Write(ref _audioAccepting, 0);
                             _audioCaptureService.Stop();
                         }
 
@@ -258,6 +262,7 @@ public sealed class RecordingController
         {
             lock (_captureGate)
             {
+                Volatile.Write(ref _audioAccepting, 0);
                 _audioCaptureService.Stop();
             }
 
@@ -287,9 +292,22 @@ public sealed class RecordingController
 
     private void OnAudioDataAvailable(byte[] buffer, int bytesRecorded)
     {
+        if (bytesRecorded <= 0) return;
+        if (Volatile.Read(ref _audioAccepting) == 0) return;
+
         var audioChunk = ArrayPool<byte>.Shared.Rent(bytesRecorded);
         Buffer.BlockCopy(buffer, 0, audioChunk, 0, bytesRecorded);
-        _ = SendAudioSequentiallyAsync(audioChunk, bytesRecorded);
+
+        lock (_captureGate)
+        {
+            if (Volatile.Read(ref _audioAccepting) == 0)
+            {
+                ArrayPool<byte>.Shared.Return(audioChunk);
+                return;
+            }
+
+            _ = SendAudioSequentiallyAsync(audioChunk, bytesRecorded);
+        }
     }
 
     private Task SendAudioSequentiallyAsync(byte[] audioData, int length)
